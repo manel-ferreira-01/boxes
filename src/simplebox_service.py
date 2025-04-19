@@ -49,8 +49,8 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
         """
         datain = request.data
 
-        ret_file= self.__calling_fn(image)
-        return simplebox_pb2.matfile(data=retfile)
+        ret_file= codigo(datain)
+        return simplebox_pb2.matfile(data=ret_file)
     
 
 def get_port():
