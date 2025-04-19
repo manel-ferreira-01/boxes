@@ -30,17 +30,3 @@ def codigo(datafile):
     savemat(f,{"im":im2,"kp":keypoints_array,"desc":descriptor})
     return f.getvalue()
 
-# Load all data from the input .mat file
-    data = scipy.io.loadmat(file_pointer)
-
-    # Remove metadata keys (which start with __) commonly found in .mat files
-    clean_data = {k: v for k, v in data.items() if not k.startswith('__')}
-
-    # Create a new in-memory .mat file
-    new_file = io.BytesIO()
-    scipy.io.savemat(new_file, clean_data)
-
-    # Reset pointer to start for reading
-    new_file.seek(0)
-
-    return new_file
