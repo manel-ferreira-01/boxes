@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 
 
-def codigo(datafile):
+def run_codigo(datafile):
     """
     Reads all variables from a MATLAB .mat file given a file pointer,
     
