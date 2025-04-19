@@ -47,8 +47,9 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
             The Image with the applied function
         features={'kp','desc'}
         """
-        image = request.data
-        image_ret= self.__calling_fn(image)
+        datain = request.data
+
+        ret_file= self.__calling_fn(image)
         return simplebox_pb2.matfile(data=retfile)
     
 
