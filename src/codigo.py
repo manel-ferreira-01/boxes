@@ -27,6 +27,6 @@ def codigo(datafile):
 
     f=io.BytesIO()
     # WRITE RETURNING DATA
-    savemat(f,{"im":im2,"kp":keypoints_array,"desc":descriptor})
+    savemat(f,{"im":im2})
     return f.getvalue()
 
