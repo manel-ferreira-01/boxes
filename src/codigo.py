@@ -1,10 +1,12 @@
-import scipy.io
 import io
+from scipy.io import loadmat, savemat
+import numpy as np
+import cv2
 
-def codigo(file_pointer):
+
+def codigo(datafile):
     """
     Reads all variables from a MATLAB .mat file given a file pointer,
-    writes them to a new in-memory .mat file, and returns the new file pointer.
     
     Parameters:
     file_pointer (file-like object): Opened .mat file in binary read mode.
@@ -12,7 +14,23 @@ def codigo(file_pointer):
     Returns:
     new_file_pointer (io.BytesIO): In-memory file-like object containing the cloned .mat file.
     """
-    # Load all data from the input .mat file
+    #Load the mat file using scipy.io.loadmat
+    mat_data=loadmat(io.BytesIO(datafile))
+
+    # SPECIFIC CODE STARTS HERE
+    im2=mat_data["im"]
+
+
+
+
+    # SPECIFIC CODE ENDS HERE
+
+    f=io.BytesIO()
+    # WRITE RETURNING DATA
+    savemat(f,{"im":im2,"kp":keypoints_array,"desc":descriptor})
+    return f.getvalue()
+
+# Load all data from the input .mat file
     data = scipy.io.loadmat(file_pointer)
 
     # Remove metadata keys (which start with __) commonly found in .mat files
