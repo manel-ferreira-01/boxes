@@ -7,8 +7,12 @@ import simplebox_pb2_grpc
 import inspect
 import os
 import time
+    
+import io
+from scipy.io import loadmat, savemat
+import numpy as np
 
-import codigo
+
 
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
@@ -49,9 +53,35 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
         """
         datain = request.data
 
-        ret_file= codigo(datain)
+        ret_file= run_codigo(datain)
         return simplebox_pb2.matfile(data=ret_file)
+
+
+def run_codigo(datafile):
+    """
+    Reads all variables from a MATLAB .mat file given a file pointer,
     
+    Parameters:
+    file_pointer (file-like object): Opened .mat file in binary read mode.
+
+    Returns:
+    new_file_pointer (io.BytesIO): In-memory file-like object containing the cloned .mat file.
+    """
+    #Load the mat file using scipy.io.loadmat
+    mat_data=loadmat(io.BytesIO(datafile))
+
+    # SPECIFIC CODE STARTS HERE
+    im2=mat_data["im"]
+
+
+
+
+    # SPECIFIC CODE ENDS HERE
+
+    f=io.BytesIO()
+    # WRITE RETURNING DATA
+    savemat(f,{"im":-im2})
+    return f.getvalue()
 
 def get_port():
     """
