@@ -22,15 +22,18 @@ def run_codigo(datafile):
     mat_data=loadmat(io.BytesIO(datafile))
     
     # SPECIFIC CODE STARTS HERE - 
-    im2=mat_data["im"]
+    # exemple (assume there is a variable im in the mat file
+    # image=mat_data["im"]
 
 
 
     # SPECIFIC CODE ENDS HERE
+
     # create file to return data
     f=io.BytesIO()
+
     # WRITE RETURNING DATA TO MAT FILE - be carefull with the variable naming
-    savemat(f,{"im":-im2})
+    #example (create a variable im ):  savemat(f,{"im":-image})
     return f.getvalue()
 ```
 
