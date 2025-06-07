@@ -32,11 +32,12 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
         """
         
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
  
     # Initialize the model and load the pretrained weights.
     # This will automatically download the model weights the first time it's run, which may take a while.
-    self._model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)        
+        self._model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)        
+        self._device = device
 
 
 
@@ -54,11 +55,11 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
         """
         datain = request.data
 
-        ret_file= run_codigo(datain, self._model)
+        ret_file= run_codigo(datain, self._model,self._device)
         return simplebox_pb2.matfile(data=ret_file)
 
 
-def run_codigo(datafile,model):
+def run_codigo(datafile,model,device):
     """
     Reads all variables from a MATLAB .mat file given a file pointer,
     
@@ -84,14 +85,15 @@ def run_codigo(datafile,model):
 
     # Create in-memory files
     for i, data in enumerate(imgdata):
-        filename = f'image_{i+1}.jpg'
+        #filename = f'image_{i+1}.jpg' uncomment if using regular files
+        # change next lines to save data on files and pass filenames in load_and_process_images
         buffer = io.BytesIO()
         buffer.write(data.flatten().tobytes())  # Write binary content to buffer
         buffer.seek(0)  # Reset pointer to beginning for future reads
         file_buffers.append(buffer)
         filenames.append(filename)
 
-    images = load_and_preprocess_images(filenames).to(device)
+    images = load_and_preprocess_images(file_buffers).to(device)
    # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+) 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
@@ -111,6 +113,8 @@ def run_codigo(datafile,model):
     # WRITE RETURNING DATA the predictions dictionary
     savemat(f,p)
     return f.getvalue()
+
+
 
 def get_port():
     """
