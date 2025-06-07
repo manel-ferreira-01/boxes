@@ -27,15 +27,8 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
     def __init__(self):
         """
         Args:
-            calling_function: the function that should be called
-                              when a new request is received
-
-                              the signature of the function should be:
-
-                              (image: bytes) -> bytes
-
-                              as described in the process method
-
+            
+          Loads VGGT model 
         """
         
 
@@ -61,11 +54,11 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
         """
         datain = request.data
 
-        ret_file= run_codigo(datain)
+        ret_file= run_codigo(datain, self._model)
         return simplebox_pb2.matfile(data=ret_file)
 
 
-def run_codigo(datafile):
+def run_codigo(datafile,model):
     """
     Reads all variables from a MATLAB .mat file given a file pointer,
     
