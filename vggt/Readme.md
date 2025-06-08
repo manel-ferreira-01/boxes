@@ -1,15 +1,22 @@
 # 3D reconstruction with VGGT:
 ### Building the container:
-Check docker directory. Add the requirements listed in 
+Check docker directory. Check the requirements listed in 
 https://github.com/facebookresearch/vggt.git
+
+Keep the service name as simplebox if you want to keep all files untouched (protos, gprc, protobuf)
+
+```bash
+$ docker build --tag sipgisr/vggtGrpc: --build-arg SERVICE_NAME=simplebox -f docker/Dockerfile .
+```
 
 ### Data format 
 
 
-- **Input** : a mat file with a dictionary with a list of encoded images
+- **Input** : a mat file with a dictionary named imgdata with a list of encoded images
 - **Output** : a mat file with all data returned by vggt
+- dict_keys(['__header__', '__version__', '__globals__', 'pose_enc', 'depth', 'depth_conf', 'world_points', 'world_points_conf', 'images'])
 
-### Building the message (see test notebook)
+### Building the message (see the notebook in the test folder)
 
 file_paths is a list with the image files to be sent to the "box" and images should be stored in a list named **imgdata** .
 ```python
