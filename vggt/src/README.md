@@ -26,6 +26,29 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
     # This will automatically download the model weights the first time it's run, which may take a while.
         self._model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)        
 ```
+### In the method process of the service (see protobuf)
+
+calls run_codigo with arguments to run vggt
+
+```python
+    def process(self, request: simplebox_pb2.matfile, context):
+        """
+        matfile is the matlab file with input data
+
+        Args:
+            request: The ImageAndFeatures request to process
+            context: Context of the gRPC call
+
+        Returns:
+            The Image with the applied function
+        features={'kp','desc'}
+        """
+        datain = request.data
+
+        ret_file= run_codigo(datain, self._model,self._device)
+        return simplebox_pb2.matfile(data=ret_file)
+``
+
 ### In function run_codigo
 
 Reads the image data and processes the sequence. Note that inside the mat file there must be a **imgdata** list with the images.
