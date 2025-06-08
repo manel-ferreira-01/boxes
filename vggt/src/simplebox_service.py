@@ -33,11 +33,11 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
         
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
- 
+        self._device = device
+
     # Initialize the model and load the pretrained weights.
     # This will automatically download the model weights the first time it's run, which may take a while.
         self._model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)        
-        self._device = device
 
 
 
@@ -82,10 +82,9 @@ def run_codigo(datafile,model,device):
     # List to hold in-memory files (as BytesIO) and their associated filenames
     file_buffers = []
     filenames = []
-
     # Create in-memory files
     for i, data in enumerate(imgdata):
-        #filename = f'image_{i+1}.jpg' uncomment if using regular files
+        filename = f'image_{i+1}.jpg' #uncomment if using regular files
         # change next lines to save data on files and pass filenames in load_and_process_images
         buffer = io.BytesIO()
         buffer.write(data.flatten().tobytes())  # Write binary content to buffer
@@ -113,8 +112,6 @@ def run_codigo(datafile,model,device):
     # WRITE RETURNING DATA the predictions dictionary
     savemat(f,p)
     return f.getvalue()
-
-
 
 def get_port():
     """
