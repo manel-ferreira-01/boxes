@@ -26,6 +26,7 @@ class ServiceImpl(simplebox_pb2_grpc.SimpleBoxServiceServicer):
     # This will automatically download the model weights the first time it's run, which may take a while.
         self._model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)        
 ```
+
 ### In the method process of the service (see protobuf)
 
 calls run_codigo with arguments to run vggt
