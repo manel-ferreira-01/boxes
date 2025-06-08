@@ -16,3 +16,10 @@ $ docker build --tag sipgisr/vggtGrpc: --build-arg SERVICE_NAME=simplebox -f doc
 - **Output** : a mat file with all data returned by vggt
 - dict_keys(['__header__', '__version__', '__globals__', 'pose_enc', 'depth', 'depth_conf', 'world_points', 'world_points_conf', 'images'])
 
+### Launching the container with the service
+
+```bash
+$ docker run -p XXXX:8061 -d vggt_name 
+```
+You may want to copy the cache to /home/runner/.cache during build or map volume
+
