@@ -50,8 +50,7 @@ class ServiceImpl(yolosimplebox_pb2_grpc.SimpleBoxServiceServicer):
             context: Context of the gRPC call
 
         Returns:
-            The Image with the applied function
-        features={'kp','desc'}
+            a matlab file with the results object from yolo prediction
         """
         datain = request.data
 
@@ -112,7 +111,8 @@ def run_codigo(datafile,model):
     all_arrays = []
 
     for i, result in enumerate(results):
-        arr_dict = extract_array_attributes(result, prefix=f'result[{i}].')
+        #arr_dict = extract_array_attributes(result, prefix=f'result[{i}].')
+        arr_dict=result.summary()
         all_arrays.append(arr_dict)
 
 

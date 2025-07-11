@@ -12,7 +12,7 @@ ARG SERVICE_NAME=yolosimplebox
 # --------------------------------------
 
 
-FROM python:3.11.10-slim-bookworm as builder
+FROM python:3.11.10-slim-bookworm AS builder
 
 ## Renew build args
 ARG WORKSPACE
