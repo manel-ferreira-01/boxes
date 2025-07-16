@@ -39,6 +39,18 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
             context.set_details('No data available')
             return acquisition_pb2.AcquireResponse()
 
+        
+def image_to_bytes(img: Image.Image):
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+# Add dummy images and labels to the queue
+#for i in range(5):
+#    img = Image.new('RGB', (100, 100), (i*40, i*20, i*30))
+#    data_queue.put(("Label_" + str(i), image_to_bytes(img)))
+
+    
 def get_port():
     """
     Parses the port where the server should listen
