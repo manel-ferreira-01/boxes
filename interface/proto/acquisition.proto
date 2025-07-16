@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package acquisition;
+
+// Define an empty request message
+message AcquireRequest {}
+
+// Define the response message
+message AcquireResponse {
+    string label = 1;
+    bytes image = 2; // image encoded as bytes (e.g., PNG or JPEG)
+}
+
+// Define the service
+service AcquisitionService {
+    rpc acquire (AcquireRequest) returns (AcquireResponse);
+}
