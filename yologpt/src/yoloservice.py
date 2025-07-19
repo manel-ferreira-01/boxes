@@ -2,6 +2,7 @@ import grpc
 from concurrent import futures
 import grpc_reflection.v1alpha.reflection as grpc_reflection
 import logging
+import os
 import yolo_pb2
 import yolo_pb2_grpc
 import cv2
@@ -88,9 +89,9 @@ if __name__ == "__main__":
 
     # Add reflection
     service_names = (
-        yolo_pb2.DESCRIPTOR.services_by_name['Yoloservice'].full_name,
+        yolo_pb2.DESCRIPTOR.services_by_name['YOLOservice'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)
 
-    run_server()
+    run_server(server)

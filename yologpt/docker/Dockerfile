@@ -1,0 +1,117 @@
+ARG USER=worker
+ARG GROUP=workers
+ARG WORKSPACE=/workspace
+ARG PROTO_FILE=yolo.proto
+ARG SRC_DIR=src
+
+# -------------------------------
+# Builder to generate python code
+# -------------------------------
+FROM python:3.10-slim AS proto_builder
+# Renew build args
+ARG WORKSPACE
+ARG PROTO_FILE
+
+ARG PROTOS_FOLDER_DIR=protos
+
+RUN apt-get update && apt-get install -y \
+    wget && \
+    wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt 
+
+RUN pip install --upgrade pip && \
+    pip install grpcio grpcio-tools protobuf
+
+COPY ${PROTOS_FOLDER_DIR} ${WORKSPACE}/
+WORKDIR ${WORKSPACE}/
+
+# Compile proto file and remove it
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${PROTO_FILE}
+
+
+# ----------------------------------
+# Builder to download model to cache
+# ----------------------------------
+#FROM ultralytics/ultralytics:latest as cache_builder
+# Renew build args
+#ARG USER
+#ARG GROUP
+#ARG WORKSPACE
+#ARG PROTO_FILE
+#ARG SRC_DIR
+
+#WORKDIR ${WORKSPACE}/
+
+# Create non-privileged user to run
+#RUN addgroup --system ${GROUP} && \
+#     adduser --system --ingroup ${GROUP} ${USER} && \
+#     chown -R ${USER}:${GROUP} ${WORKSPACE}
+
+# # Copy script to load cache
+# COPY --chown=${USER}:${GROUP} ${SRC_DIR}/load_cache.py .
+
+# # Change to non-privileged user so that cache files go to user home
+# USER ${USER}
+
+# ENV HOME=/home/${USER}
+
+# # Import model to user cache
+# # For different models change load in load_cached
+# RUN python load_cache.py
+
+# ------------------------------
+# Final image to run the service
+# ------------------------------
+#FROM ultralytics/ultralytics:latest
+FROM python:3.10-slim 
+# Renew build args
+ARG USER
+ARG GROUP
+ARG WORKSPACE
+ARG PROTO_FILE
+ARG SRC_DIR
+
+WORKDIR ${WORKSPACE}/
+
+# Create non-privileged user to run
+RUN addgroup --system ${GROUP} && \
+    adduser --system --ingroup ${GROUP} ${USER} && \
+    chown -R ${USER}:${GROUP} ${WORKSPACE}
+# Install OS dependencies
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+
+RUN pip install --upgrade pip && \
+    pip install grpcio grpcio-reflection ultralytics opencv-python
+#    pip install grpcio==1.35.0 grpcio-reflection==1.35.0 ultralytics opencv-python
+
+# COPY .proto file to root to meet ai4eu specifications
+COPY --from=proto_builder --chown=${USER}:${GROUP} ${WORKSPACE}/${PROTO_FILE} /
+
+COPY --from=proto_builder --chown=${USER}:${GROUP} /yolo11n.pt  ${WORKSPACE}/
+
+# Copy generated code to workspace
+COPY --from=proto_builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
+
+# # Copy cache
+# COPY --from=cache_builder --chown=${USER}:${GROUP} /home/${USER}/.cache/torch/ /home/${USER}/.cache/torch/
+
+# # Copy modet .pt file
+# COPY --from=cache_builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.pt ${WORKSPACE}/
+
+# Copy code
+COPY --chown=${USER}:${GROUP} ${SRC_DIR}/yoloservice.py .
+
+# Change to non-privileged user
+USER ${USER}
+
+ENV HOME=/home/${USER}
+
+# Expose port 8061 according to ai4eu specifications
+EXPOSE 8061
+
+WORKDIR ${WORKSPACE}/
+
+CMD ["python", "yoloservice.py"]
