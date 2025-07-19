@@ -10,13 +10,13 @@ The service is fully compliant with the [AI4Europe](http://ai4europe.eu) platfor
 The service can be deployed as a docker service downloadable from docker hub :
 
 ```shell
-$ docker run --rm -p 8061:8061 --ipc=host sipgisr/yolov11-grpc:latest
+$ docker run --rm -p 8061:8061 --ipc=host sipgisr/yolov11:latest
 ```
 The service will download the model from the ultralytics repository. If you have a local copy then mount the model from host (here we use another port as an example):
 
 
 ```bash
-docker run -p XXXX:8061 -v $(pwd)/yolo11n.pt:/workspace/yolo11n.pt sipgisr/yolov11-grpc
+docker run -p XXXX:8061 -v $(pwd)/yolo11n.pt:/workspace/yolo11n.pt sipgisr/yolov11
 ```
 
 To generate the container locally see the [docker folder](docker)
@@ -61,17 +61,17 @@ The Yolov11 service receives one image and detection parameters in **YOLORequest
 
 ### `YOLORequest`
 
-| Field                  | Type   | Description                                              |
-|------------------------|--------|----------------------------------------------------------|
-| `image`               | `bytes`| Image data encoded as JPEG/PNG                           |
-| `confidence_threshold`| `float`| Filter threshold for confidence (range 0.0 to 1.0)       |
+| Field                  | Type   | Description                                             |
+|------------------------|--------|---------------------------------------------------------|
+| `image`                | `bytes`| Image data encoded as JPEG/PNG                          |
+| `confidence_threshold` | `float`| Filter threshold for confidence (range 0.0 to 1.0)      |
 
 ### `YOLOResponse`
 
 | Field            | Type     | Description                                  |
 |------------------|----------|----------------------------------------------|
-| `labeled_image` | `bytes`  | JPEG image with bounding boxes drawn         |
-| `detections_json` | `string` | JSON array with detected object metadata     |
+| `labeled_image`  | `bytes`  | JPEG image with bounding boxes drawn         |
+| `detections_json`| `string` | JSON array with detected object metadata     |
 
 Example detection JSON:
 ```json
