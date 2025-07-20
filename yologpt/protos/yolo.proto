@@ -4,6 +4,7 @@ package yolo;
 
 service YOLOservice {
   rpc Detect (YOLORequest) returns (YOLOResponse);
+  rpc Track (YOLOTrackRequest) returns (YOLOResponse);
 }
 
 message YOLORequest {
@@ -14,4 +15,8 @@ message YOLORequest {
 message YOLOResponse {
   bytes labeled_image = 1;
   string detections_json = 2;
+}
+message YOLOTrackRequest {
+  bytes image = 1;              // JPEG image frame
+  string track_config_json = 2; // JSON string with YOLO tracking args
 }
