@@ -39,11 +39,6 @@ class YOLOserviceStub(object):
                 request_serializer=yolo__pb2.YOLORequest.SerializeToString,
                 response_deserializer=yolo__pb2.YOLOResponse.FromString,
                 _registered_method=True)
-        self.Track = channel.unary_unary(
-                '/yolo.YOLOservice/Track',
-                request_serializer=yolo__pb2.YOLOTrackRequest.SerializeToString,
-                response_deserializer=yolo__pb2.YOLOResponse.FromString,
-                _registered_method=True)
 
 
 class YOLOserviceServicer(object):
@@ -55,23 +50,12 @@ class YOLOserviceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Track(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_YOLOserviceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Detect': grpc.unary_unary_rpc_method_handler(
                     servicer.Detect,
                     request_deserializer=yolo__pb2.YOLORequest.FromString,
-                    response_serializer=yolo__pb2.YOLOResponse.SerializeToString,
-            ),
-            'Track': grpc.unary_unary_rpc_method_handler(
-                    servicer.Track,
-                    request_deserializer=yolo__pb2.YOLOTrackRequest.FromString,
                     response_serializer=yolo__pb2.YOLOResponse.SerializeToString,
             ),
     }
@@ -101,33 +85,6 @@ class YOLOservice(object):
             target,
             '/yolo.YOLOservice/Detect',
             yolo__pb2.YOLORequest.SerializeToString,
-            yolo__pb2.YOLOResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Track(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/yolo.YOLOservice/Track',
-            yolo__pb2.YOLOTrackRequest.SerializeToString,
             yolo__pb2.YOLOResponse.FromString,
             options,
             channel_credentials,

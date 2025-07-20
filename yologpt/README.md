@@ -59,6 +59,7 @@ python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. yolo.proto
 
 The Yolov11 service receives one image and detection parameters in **YOLORequest** message, the image encoded as a jpeg/png binary file and the threshold as a flot. It returns the image with detected labels and a json string with the detections in message **YOLOResponse** . 
 
+## Detection
 ### `YOLORequest`
 
 | Field                  | Type   | Description                                             |
@@ -82,3 +83,27 @@ Example detection JSON:
   "class_name": "person"
 }
 ```
+## Tracking
+The tracking method :
+```bash
+rpc Track (YOLOTrackRequest) returns (YOLOResponse)
+```
+
+##  `YOLOTrackRequest`
+
+| Field                  | Type   | Description                                          |
+|------------------------|--------|------------------------------------------------------|
+| `image`                | `bytes`| Image data encoded as JPEG/PNG                       |
+| `track_config_json` | `string`| Configuration parameters to yolo.track  |
+
+Refer to [Multi-Object Tracking with Ultralytics YOLO](https://docs.ultralytics.com/modes/track/)
+
+The track_config_json string is a list of 2 elements, the first onde dict with our own commands and the second a dict of yolo commands. The definition is:
+
+track_config_json=json.dumps([{"mycommand1":value1,"mycommand2":val2..},{"yolocomm1":val1,...}])
+
+### Implemented commands
+
+mycommands can be:
+
+"reset":"1" - reset tracker ID's

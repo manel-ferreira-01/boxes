@@ -1,3 +1,4 @@
+
 import grpc
 from concurrent import futures
 import grpc_reflection.v1alpha.reflection as grpc_reflection
@@ -19,7 +20,6 @@ _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
     def __init__(self):
         self.model = YOLO("yolo11n.pt")  # Ensure this is YOLOv11
-        self.model.predictor.trackers[0].reset()
 #       https://docs.ultralytics.com/modes/predict/#inference-arguments
  
     def Detect(self, request, context):
@@ -57,7 +57,51 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             labeled_image=labeled_image_bytes.tobytes(),
             detections_json=detections_json
         )
+    def Track(self, request, context):
+            # Decode image
+            frame = cv2.imdecode(np.frombuffer(request.image, np.uint8), cv2.IMREAD_COLOR)
+            
+            # Parse track config JSON
+            try:
+                config = json.loads(request.track_config_json or "{}")
+                if config:
+                    configyolo=config[1]
+                    if config[0].pop("reset",None):#process commands (TODO)
+                        self.model.predictor.trackers[0].reset() #reset tracker ID's
+                else :
+                    configyolo={}
 
+            except json.JSONDecodeError:
+                config = {}
+                logging.exception("JSON not valid ")
+            # Run tracking
+            results = self.model.track(source=frame, persist=True, **configyolo)
+
+            names = self.model.names
+            detections = []
+
+            for r in results:
+                for b in r.boxes:
+                    track_id = int(b.id.item()) if b.id is not None else -1
+                    class_id = int(b.cls)
+                    class_name = names.get(class_id, f"class_{class_id}")
+                    conf = float(b.conf)
+                    box = b.xyxy[0].tolist()
+                    detections.append({
+                        "track_id": track_id,
+                        "bbox": box,
+                        "confidence": conf,
+                        "class_id": class_id,
+                        "class_name": class_name
+                    })
+
+            annotated = results[0].plot()
+            _, labeled_bytes = cv2.imencode('.jpg', annotated)
+
+            return yolo_pb2.YOLOResponse(
+                labeled_image=labeled_bytes.tobytes(),
+                detections_json=json.dumps(detections)
+            )
 
 def run_server(server):
     try:
