@@ -28,36 +28,6 @@ WORKDIR ${WORKSPACE}/
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${PROTO_FILE}
 
 
-# ----------------------------------
-# Builder to download model to cache
-# ----------------------------------
-#FROM ultralytics/ultralytics:latest as cache_builder
-# Renew build args
-#ARG USER
-#ARG GROUP
-#ARG WORKSPACE
-#ARG PROTO_FILE
-#ARG SRC_DIR
-
-#WORKDIR ${WORKSPACE}/
-
-# Create non-privileged user to run
-#RUN addgroup --system ${GROUP} && \
-#     adduser --system --ingroup ${GROUP} ${USER} && \
-#     chown -R ${USER}:${GROUP} ${WORKSPACE}
-
-# # Copy script to load cache
-# COPY --chown=${USER}:${GROUP} ${SRC_DIR}/load_cache.py .
-
-# # Change to non-privileged user so that cache files go to user home
-# USER ${USER}
-
-# ENV HOME=/home/${USER}
-
-# # Import model to user cache
-# # For different models change load in load_cached
-# RUN python load_cache.py
-
 # ------------------------------
 # Final image to run the service
 # ------------------------------
@@ -81,7 +51,6 @@ RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
-
 
 RUN pip install --upgrade pip && \
     pip install grpcio grpcio-reflection ultralytics opencv-python
