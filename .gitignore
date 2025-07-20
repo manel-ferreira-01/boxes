@@ -6,3 +6,11 @@ yolo/test/.ipynb_checkpoints/test_simplebox-checkpoint.ipynb
 yolo/test/.ipynb_checkpoints/test_simplebox-matlab-checkpoint.ipynb
 yolo/test/__pycache__/yolosimplebox_pb2.cpython-312.pyc
 yolo/test/__pycache__/yolosimplebox_pb2_grpc.cpython-312.pyc
+yologpt/.devcontainer/devcontainer.json
+yologpt/rtdetr-l.pt
+yologpt/src/yolo11n.pt
+yologpt/test/yolo11n.pt
+yologpt/test/__pycache__/yolo_pb2_grpc.cpython-312.pyc
+yologpt/test/__pycache__/yolo_pb2.cpython-312.pyc
+yologpt/.devcontainer/noop.txt
+yologpt/.devcontainer/Dockerfile
