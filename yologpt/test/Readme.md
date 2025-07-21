@@ -1,40 +1,33 @@
 ## 🚀 Python Client Example
 
+The notebooks show how to interact with the service
+
 The code in the yolotest.py script interacts with the Yolo service:
     - send one image
-    - receive the json string and the annoted image
+    - receive the json string and the annoted image and stores in files
 
 ```python
 import grpc
 import yolo_pb2
 import yolo_pb2_grpc
 import cv2
-import json
-import numpy as np
+from scipy.io import savemat
 
-# Load and encode image
-img = cv2.imread("test.jpg")
-_, img_encoded = cv2.imencode('.jpg', img)
+# Read image and encode as bytes
+img = cv2.imread("/home/jovyan/jpc/code/boxes/Images/eiffel.png")
+_,img_encoded = cv2.imencode('.jpg', img)
 img_bytes = img_encoded.tobytes()
 
-# Connect to gRPC server on port 8061
-#change server IP and port as appropriate
-
-channel = grpc.insecure_channel('localhost:8061')
+channel = grpc.insecure_channel('Mac.lan:8061')
 stub = yolo_pb2_grpc.YOLOserviceStub(channel)
 
-# Send request
-response = stub.Detect(yolo_pb2.YOLORequest(
-    image=img_bytes,
-    confidence_threshold=0.5
-))
+response = stub.Detect(yolo_pb2.YOLORequest(image=img_bytes,confidence_threshold=0.2))
 
-# Save labeled image
-labeled_img = cv2.imdecode(np.frombuffer(response.labeled_image, np.uint8), cv2.IMREAD_COLOR)
-cv2.imwrite("labeled_output.jpg", labeled_img)
 
-# Parse detections
-detections = json.loads(response.detections_json)
-for d in detections:
-    print(f"Detected {d['class_name']} with confidence {d['confidence']:.2f} at {d['bbox']}")
+with open("output.jpg","wb") as f:
+    f.write(response.labeled_image)
+detections=eval(response.detections_json)
+savemat("detections.mat",{"detections":detections})
+
+channel.close()
 ```
