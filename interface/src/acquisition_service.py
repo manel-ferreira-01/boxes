@@ -18,7 +18,7 @@ _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 
 # This is your global queue
-data_queue = queue.Queue(maxsize=3)
+data_acq_queue = queue.Queue(maxsize=3)
 
 # GRPC server implementation
 class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer):
@@ -32,7 +32,7 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
     def acquire(self, request, context):
 
         try:
-            label, image_bytes = data_queue.get()
+            label, image_bytes = data_acq_queue.get()
             return acquisition_pb2.AcquireResponse(label=label, image=image_bytes)
         except queue.Empty:
             context.set_code(grpc.StatusCode.NOT_FOUND)
@@ -119,7 +119,3 @@ if __name__ == '__main__':
 
     run_server(server)
 
-
-
-   if __name__ == '__main__':
-    serve()
