@@ -1,24 +1,30 @@
+import gradio as gr
 import queue
+import time
+import queue
+import os
 import time
 import grpc
 import grpc_reflection.v1alpha.reflection as grpc_reflection
 import logging
 from concurrent import futures
+from PIL import Image, ImageOps
 
 import acquisition_pb2
 import acquisition_pb2_grpc
-
-# Fill the queue with sample data for demo
-from PIL import Image
 import io
 import base64
+
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 
 # This is your global queue
+# Queues
 data_acq_queue = queue.Queue(maxsize=3)
+data_display_queue = queue.Queue(maxsize=3)
+
 
 # GRPC server implementation
 class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer):
@@ -33,22 +39,52 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
 
         try:
             label, image_bytes = data_acq_queue.get()
+            # json.dumps(process labels) labels - text need json format
             return acquisition_pb2.AcquireResponse(label=label, image=image_bytes)
         except queue.Empty:
             context.set_code(grpc.StatusCode.NOT_FOUND)
             context.set_details('No data available')
             return acquisition_pb2.AcquireResponse()
 
+    def display(self, request, context):
+
+        frame = cv2.imdecode(np.frombuffer(request.image, np.uint8), cv2.IMREAD_COLOR)
+        info =request.label # TODO json.loads(request.label or "{}")
+        data_dispay_queue([info,frame])
+        return acquisition_pb2.DisplayResponse()
         
 def image_to_bytes(img: Image.Image):
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     return buf.getvalue()
 
-# Add dummy images and labels to the queue
-#for i in range(5):
-#    img = Image.new('RGB', (100, 100), (i*40, i*20, i*30))
-#    data_queue.put(("Label_" + str(i), image_to_bytes(img)))
+# Put image in the queue to be read by acquire method
+# Input handler
+def handle_input(image):
+    if image is not None:
+        data_acq_queue.put(image)
+    return display_img()
+
+# Output handler
+def display_img():
+    if not data_display_queue.empty():
+        info,img= data_display_queue.get()
+        return img, info
+    else:
+        return None, "Waiting for image..."
+
+# Launch interface
+def acq_img():
+    with gr.Blocks() as demo:
+        with gr.Row():
+            img_input = gr.Image(label="Upload Image", type="pil")
+            img_output = gr.Image(label="Processed Image")
+        info_output = gr.Textbox(label="Processing Info")
+
+        img_input.input(fn=handle_input, inputs=img_input, outputs=[img_output])
+    
+    return demo
+
 
     
 def get_port():
@@ -91,6 +127,8 @@ def run_server(server):
     server.start()
     logging.info(f'''Server started at {target}''')
     try:
+        app=acq_img()
+        app.launch(server_name="0.0.0.0", server_port=7860, share=True,prevent_thread_lock=True)
         while True:
             time.sleep(_ONE_DAY_IN_SECONDS)
     except KeyboardInterrupt:
