@@ -46,7 +46,13 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
         Initializes the AcquisitionServiceServicer.
         """
         logging.info("AcquisitionServiceServicer initialized.")
-        
+        #Launch the gradio app
+        app = acq_img()
+        # Launch Gradio app. prevent_thread_lock=True is important when running with other threads/services.
+        logging.info("Launching Gradio UI...")
+        app.launch(server_name="0.0.0.0", server_port=7860, share=True, prevent_thread_lock=True)
+        self.gradio=app
+     
     def acquire(self, request, context):
         """
         Implements the acquire RPC method.
@@ -229,10 +235,6 @@ def run_server(server):
     logging.info(f'gRPC Server started at {target}')
 
     try:
-        app = acq_img()
-        # Launch Gradio app. prevent_thread_lock=True is important when running with other threads/services.
-        logging.info("Launching Gradio UI...")
-        app.launch(server_name="0.0.0.0", server_port=7860, share=True, prevent_thread_lock=True)
         
         # Keep the main thread alive indefinitely for the gRPC server
         while True:
