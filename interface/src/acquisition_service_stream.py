@@ -46,11 +46,10 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
         Initializes the AcquisitionServiceServicer.
         """
         logging.info("AcquisitionServiceServicer initialized.")
-        self.app,self.state = acq_img()
+        self.app = acq_img()
         # Launch Gradio app. prevent_thread_lock=True is important when running with other threads/services.
         logging.info("Launching Gradio UI...")
         self.app.launch(server_name="0.0.0.0", server_port=7860, share=True, prevent_thread_lock=True)
-        self.merda=1
         
         
     def acquire(self, request, context):
@@ -60,7 +59,9 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
         """
         try:
             # Data from queue is expected to be (label_str, image_bytes)
+
             label, image_bytes = data_acq_queue.get() # Add timeout for robustness
+            
             logging.info(f"Acquire: Retrieved data from queue. Label length: {len(label)}, Image bytes: {len(image_bytes)}")
             return acquisition_pb2.AcquireResponse(label=label, image=image_bytes)
         except queue.Empty:
@@ -97,12 +98,9 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
 
             # Put into the display queue.
             # Gradio's Image component with type="numpy" expects a numpy array.
+
             data_display_queue.put([info, frame])
-            logging.info("DisplayGRPC: Data successfully put into data_display_queue.")
-            print(self.state)
-            self.state= self.merda
-            self.merda=self.merda+1
-            xx=self.merda
+            
             return acquisition_pb2.DisplayResponse()
         except json.JSONDecodeError as e:
             logging.error(f"Display: Error decoding label JSON: {e}")
@@ -142,7 +140,7 @@ def handle_input(image: Image.Image, session_id: str):
             return 
         except Exception as e:
             logging.exception(f"Gradio handle_input: Error processing image: {e}")
-            return None, f"Error processing input: {e}"
+            return
     else:
         logging.info("Gradio handle_input: No image provided.")
         return # Still attempt to display existing data
@@ -178,8 +176,6 @@ def acq_img():
     """Defines and returns the Gradio Blocks interface."""
     with gr.Blocks() as demo:
         gr.Markdown("# Image Acquisition & Display Service")
-        gr.Markdown("Upload an image below to simulate acquisition. The gRPC server's `acquire` method can then fetch it.")
-        gr.Markdown("Separately, you can trigger the gRPC `display` method from a client to send an image to this UI.")
         
         with gr.Row():
             with gr.Column():
@@ -196,19 +192,9 @@ def acq_img():
                 state=gr.State(0)
                 xx=state
 
-        # Link input to handler
-        # Using .change instead of .input for better reactivity if image is dropped/changed
         img_input.change(fn=handle_input, inputs=[img_input, session_id_input])
-        #session_id_input.change(fn=handle_input, inputs=[img_input, session_id_input])
-        #img_output.stream(fn=display_img,outputs=[img_output, info_output])
-        state.change(fn=display_img,inputs=state,outputs=[img_output, info_output] )
-
-        # To continuously poll for new images to display, use gr.Live
-        # Note: gr.Live / gr.Blocks with .load and queue=True can be complex with gRPC.
-        # For simplicity, we'll rely on the input trigger or manual refresh.
-        # A more advanced setup might use websockets or server-sent events for continuous updates.
         
-    return demo,state
+    return demo
 
 # --- Server Utilities ---
 
