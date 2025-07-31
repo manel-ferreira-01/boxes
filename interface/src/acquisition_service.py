@@ -10,7 +10,7 @@ from PIL import Image, ImageOps
 import io
 import json # Import json for handling JSON strings
 import numpy as np # Import numpy
-import cv2 # Import cv2 (OpenCV)
+#import cv2 # Import cv2 (OpenCV)
 
 import acquisition_pb2
 import acquisition_pb2_grpc
@@ -161,13 +161,13 @@ def display_img(state):
             return img_np, info,state+1
         except queue.Empty:
             # Should not happen with empty check, but for safety
-            logging.warning("Gradio display_img: Queue became empty before getting data.")
+            #logging.warning("Gradio display_img: Queue became empty before getting data.")
             return lastimage, lastinfo ,state
         except Exception as e:
             logging.exception(f"Gradio display_img: Error getting data from display queue: {e}")
             return None, f"Error displaying image: {e}",state
     else:
-        logging.info("Gradio display_img: Display queue is empty. Waiting for image...")
+        #logging.info("Gradio display_img: Display queue is empty. Waiting for image...")
         return lastimage, lastinfo,state
 
 # Gradio Interface Definition -------------------------------------------------------

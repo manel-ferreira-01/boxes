@@ -1,0 +1,9 @@
+grpcio
+grpcio-tools
+protobuf
+grpcio-reflection
+opencv-python==4.6.0.66
+numpy
+scipy
+gradio
+pillow
