@@ -5,15 +5,15 @@ ARG WORKSPACE=/workspace
 # proto file as well as the python file with the server
 # The proto file should have the name ${SERVICE_NAME}.proto
 # The python file should have the name ${SERVICE_NAME}_service.py
-ARG SERVICE_NAME=image_generic
-
+ARG SERVICE_NAME=acquisition
 
 # --------------------------------------
 # Builder stage to generate .proto files
 # --------------------------------------
 
 #FROM python:slim-buster as builder
-FROM python:latest as builder
+FROM python:3.10.18-slim-bullseye AS builder
+
 ## Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME
@@ -36,7 +36,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${SERVICE
 # Stage to generate final image
 # -----------------------------
 
-FROM python:slim-buster
+FROM python:3.10.18-slim-bullseye
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME
@@ -70,15 +70,14 @@ COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
 
 # Copy the service file and the utils to workspace
 # (rename service file to only service.py for generic usage)
-COPY --chown=${USER}:${GROUP} ${SRC}/utils.py ${WORKSPACE}/utils.py
 COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/service.py
-COPY --chown=${USER}:${GROUP} ${SRC}/external.py ${WORKSPACE}/external.py
 
 # Change to non-privileged user
 USER ${USER}
 
 # Expose port 8061 according to ai4eu specifications
 EXPOSE 8061
+EXPOSE 7860
 
 WORKDIR ${WORKSPACE}
 
