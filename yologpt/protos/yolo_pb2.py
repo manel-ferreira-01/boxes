@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nyolo.proto\x12\x04yolo\":\n\x0bYOLORequest\x12\r\n\x05image\x18\x01 \x01(\x0c\x12\x1c\n\x14\x63onfidence_threshold\x18\x02 \x01(\x02\">\n\x0cYOLOResponse\x12\x15\n\rlabeled_image\x18\x01 \x01(\x0c\x12\x17\n\x0f\x64\x65tections_json\x18\x02 \x01(\t2>\n\x0bYOLOservice\x12/\n\x06\x44\x65tect\x12\x11.yolo.YOLORequest\x1a\x12.yolo.YOLOResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nyolo.proto\x12\x04yolo\"1\n\x0bYOLORequest\x12\x13\n\x0byolo_config\x18\x01 \x01(\t\x12\r\n\x05image\x18\x02 \x01(\x0c\">\n\x0cYOLOResponse\x12\x17\n\x0f\x64\x65tections_json\x18\x01 \x01(\t\x12\x15\n\rlabeled_image\x18\x02 \x01(\x0c\"<\n\x10YOLOTrackRequest\x12\x19\n\x11track_config_json\x18\x01 \x01(\t\x12\r\n\x05image\x18\x02 \x01(\x0c\x32s\n\x0bYOLOservice\x12/\n\x06\x44\x65tect\x12\x11.yolo.YOLORequest\x1a\x12.yolo.YOLOResponse\x12\x33\n\x05Track\x12\x16.yolo.YOLOTrackRequest\x1a\x12.yolo.YOLOResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,9 +32,11 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'yolo_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_YOLOREQUEST']._serialized_start=20
-  _globals['_YOLOREQUEST']._serialized_end=78
-  _globals['_YOLORESPONSE']._serialized_start=80
-  _globals['_YOLORESPONSE']._serialized_end=142
-  _globals['_YOLOSERVICE']._serialized_start=144
-  _globals['_YOLOSERVICE']._serialized_end=206
+  _globals['_YOLOREQUEST']._serialized_end=69
+  _globals['_YOLORESPONSE']._serialized_start=71
+  _globals['_YOLORESPONSE']._serialized_end=133
+  _globals['_YOLOTRACKREQUEST']._serialized_start=135
+  _globals['_YOLOTRACKREQUEST']._serialized_end=195
+  _globals['_YOLOSERVICE']._serialized_start=197
+  _globals['_YOLOSERVICE']._serialized_end=312
 # @@protoc_insertion_point(module_scope)

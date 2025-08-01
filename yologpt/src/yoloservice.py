@@ -9,6 +9,7 @@ import yolo_pb2_grpc
 import cv2
 import numpy as np
 import json
+import base64
 from ultralytics import YOLO
 
 # VERIFY THE PORT NUMBER 
@@ -25,7 +26,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
     def Detect(self, request, context):
         # Decode image from bytes
         nparr = np.frombuffer(request.image, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[...,(2,1,0)]
 
         # Run YOLO inference
         results = self.model(img)
@@ -49,7 +50,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
                     "confidence": conf,
                     "class_id": cls
                 })
-
+        detections.append({"image": base64.b64encode(nparr).decode('utf-8')})
         # Convert detections to JSON string
         detections_json = json.dumps(detections)
 

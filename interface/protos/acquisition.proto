@@ -13,7 +13,7 @@ message AcquireRequest {}
 
 // Define the response message
 message AcquireResponse {
-    string label = 1; // json string with gradio session
+    string label = 1; // json string with gradio session or commands
     bytes image = 2; // image encoded as bytes (e.g., PNG or JPEG)
 }
 

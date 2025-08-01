@@ -8,15 +8,16 @@ service YOLOservice {
 }
 
 message YOLORequest {
-  bytes image = 1;
-  float confidence_threshold = 2;
+  string yolo_config = 1;
+  bytes image = 2;
 }
 
 message YOLOResponse {
-  bytes labeled_image = 1;
-  string detections_json = 2;
+  string detections_json = 1;
+  bytes labeled_image = 2;
 }
+
 message YOLOTrackRequest {
-  bytes image = 1;              // JPEG image frame
-  string track_config_json = 2; // JSON string with YOLO tracking args
+  string track_config_json = 1; // JSON string with YOLO tracking args
+  bytes image = 2;              // JPEG image frame
 }
