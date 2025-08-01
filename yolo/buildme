@@ -1,2 +1,0 @@
-docker build -t jpcosteira/yolosimplebox -f docker/Dockerfile .
-

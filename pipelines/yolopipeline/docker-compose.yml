@@ -1,0 +1,15 @@
+version: '3'
+services:
+  image-source:
+    image: sipgisr/acquisition
+    ports:
+    - 7860:7860
+  yolo-model:
+    image: sipgisr/yolov11
+  orchestrator-node:
+    image: sipgisr/maestro
+    volumes: 
+    - type: bind
+      source: ./config.yaml
+      target: /config.yaml
+    
