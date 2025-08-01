@@ -27,12 +27,16 @@ kind: link
 spec:
   name: yolo-gradio
   source_stage: Yolodetect
+    source_field: labeled_image
   target_stage: gradio-display
+    target_field: image
   pipeline: Yolo
 ---
 kind: link
 spec:
   name: gradio-yolo
   source_stage: gradio-source
+    source_field: image
   target_stage: Yolodetect
+    target_field: image
   pipeline: Yolo
