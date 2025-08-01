@@ -2,6 +2,8 @@ This _Box_ provides a gRPC service for the [YoloV11 from Ultalytics](https://git
 
 The service is fully compliant with the [AI4Europe](http://ai4europe.eu) platform definitions and can be launched as a docker service or as a _standalone_ python script. 
 
+![271478425-ee6e6038-383b-4f21-ac29-b2a1c7d386ab](https://github.com/user-attachments/assets/0895774a-719f-48f8-8ccb-28ae3fb18ee1)
+
 
 ---
 
