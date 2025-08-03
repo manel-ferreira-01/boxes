@@ -25,14 +25,21 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
  
     def Detect(self, request, context):
         # Decode image from bytes
-        nparr = np.frombuffer(request.image, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[...,(2,1,0)]
-
+        try:
+            nparr = np.frombuffer(request.image, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[...,(2,1,0)]
+        except:
+            logging.error('Image Not valid')
+            img= np.random.randint(255, size=(900,800,3),dtype=np.uint8)
+            
         # Run YOLO inference
         results = self.model(img)
 
         # Draw boxes on image
-        annotated_frame = results[0].plot()
+#        annotated_frame = results[0].plot()
+        #results[0].orig_img = np.ascontiguousarray(results[0].orig_img)
+        #annotated = results[0].plot()
+        annotated_frame = results[0].plot(img=np.ascontiguousarray(results[0].orig_img))
 
         # Encode image with boxes to bytes
         _, labeled_image_bytes = cv2.imencode('.jpg', annotated_frame)
@@ -50,7 +57,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
                     "confidence": conf,
                     "class_id": cls
                 })
-        detections.append({"image": base64.b64encode(nparr).decode('utf-8')})
+        #detections.append({"image": base64.b64encode(nparr).decode('utf-8')})
         # Convert detections to JSON string
         detections_json = json.dumps(detections)
 
