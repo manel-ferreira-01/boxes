@@ -154,7 +154,7 @@ def display_img(state):
     if not data_display_queue.empty():
 #    if True : #fila com suspensão
         try:
-            info, img_np = data_display_queue.get(timeout=0.5) # img_np is expected to be a numpy array from cv2.imdecode
+            info, img_np = data_display_queue.get(timeout=0.1) # img_np is expected to be a numpy array from cv2.imdecode
             # Gradio gr.Image(type="numpy") expects a numpy array
             lastimage=img_np
             lastinfo=info
