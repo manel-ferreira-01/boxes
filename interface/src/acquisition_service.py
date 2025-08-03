@@ -78,30 +78,23 @@ class AcquisitionServiceServicer(acquisition_pb2_grpc.AcquisitionServiceServicer
         and puts them into data_display_queue for Gradio to pick up.
         """
         try:
-            # Convert bytes to OpenCV image (numpy array)
-            #np_array = np.frombuffer(request.image, np.uint8)
-            #frame = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-            frame=Image.open(io.BytesIO(request.image))
-            frame= np.asarray(frame)
-            if frame is None:
+            if request.image is None:
                 logging.error("Display: Failed to decode image bytes into an OpenCV frame.")
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details('Failed to decode image bytes.')
                 return acquisition_pb2.DisplayResponse()
-
+            
+            frame=np.asarray(Image.open(io.BytesIO(request.image)))
             info = request.label # label is already a string (hopefully JSON)
-
-            logging.info(f"Display: Received image (shape: {frame.shape}) with label: {info}. Going to put in queue")
-
+            logging.info(f"GRPC Display: Received image (shape: {frame.shape}) with label:  Going to put in queue")
             data_display_queue.put([info, frame])
-            return acquisition_pb2.DisplayResponse()
-        
+            logging.info(f"GRPC Display: put in queue done")
+            return acquisition_pb2.DisplayResponse()        
         except json.JSONDecodeError as e:
             logging.error(f"Display: Error decoding label JSON: {e}")
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(f'Invalid JSON format for label: {e}')
             return acquisition_pb2.DisplayResponse()
-        
         except Exception as e:
             logging.exception(f"Display: An unexpected error occurred: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -129,15 +122,15 @@ def handle_input(image: Image.Image, session_id: str):
             
             image_bytes = image_to_bytes(image, format='PNG')
             data_acq_queue.put((label_json, image_bytes)) # Put tuple (label, image_bytes)
-            logging.info(f"HANDLE_INPUT: Put image (bytes: {len(image_bytes)}) with label to acquisition queue.")
+            logging.info(f"GRADIO: handle_input: Put image (bytes: {len(image_bytes)}) with label to acquisition queue.")
             
             # Immediately try to display something from the display queue if available
             return 
         except Exception as e:
-            logging.exception(f"Gradio handle_input: Error processing image: {e}")
+            logging.exception(f"GRADIO handle_input: Error processing image: {e}")
             return 
     else:
-        logging.info("HANDLE_INPUT: No image provided.")
+        logging.info("GRADIO: handle_input: No image provided.")
         #img = Image.new('RGB', (200, 200), (100,100,100))
         #image_bytes=image_to_bytes(img)
         #data_acq_queue.put(("merda", image_bytes)) # Put tuple (label, image_bytes)
