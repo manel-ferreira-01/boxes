@@ -8,8 +8,7 @@ services:
     image: sipgisr/yolov11
   maestro:
     image: duartemralves/maestro:v1-latest
-    volumes: 
-    - type: bind
-      source: /Users/jpc/code/boxes/pipelines/yolopipeline/config.yaml
-      target: /config.yaml
-    
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /config.yaml

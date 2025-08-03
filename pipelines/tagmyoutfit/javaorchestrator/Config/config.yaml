@@ -1,0 +1,47 @@
+stages:
+  - name: "Source"
+    host: image-source
+    port: 8061
+    method: GetStream
+  - name: "OpenPose"
+    host: open-pose
+    port: 8061
+  - name: "OpenCV"
+    host: open-cv
+    port: 8061
+  - name: "TagMyOutfit"
+    host: tag-my-outfit
+    port: 8061
+    method: predict
+  - name: "Visualization"
+    host: visualization
+    port: 8061
+links:
+  - source:
+      stage: "Source"
+    target:
+      stage: "OpenPose"
+  - source:
+      stage: "Source"
+    target:
+      stage: "OpenCV"
+      field: "image"
+  - source:
+      stage: "OpenPose"
+    target:
+      stage: "OpenCV"
+      field: "detected_poses"
+  - source:
+      stage: "OpenCV"
+    target:
+      stage: "TagMyOutfit"
+  - source:
+      stage: "TagMyOutfit"
+    target:
+      stage: "Visualization"
+      field: "prediction"
+  - source:
+      stage: "Source"
+    target:
+      stage: "Visualization"
+      field: "image"
