@@ -77,6 +77,7 @@ USER ${USER}
 
 # Expose port 8061 according to ai4eu specifications
 EXPOSE 8061
+EXPOSE 8161
 EXPOSE 7860
 
 WORKDIR ${WORKSPACE}

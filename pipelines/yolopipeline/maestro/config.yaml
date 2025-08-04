@@ -12,6 +12,7 @@ spec:
 kind: stage
 spec: 
   name: gradio-source
+  service: AcquisitionService
   method: acquire
   address: interface:8061
   pipeline: Yolo
@@ -19,8 +20,9 @@ spec:
 kind: stage
 spec: 
   name: gradio-display
+  service: DisplayService
   method: display
-  address: interface:8061
+  address: interface:8161
   pipeline: Yolo
 ---
 kind: link
