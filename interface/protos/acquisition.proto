@@ -1,9 +1,11 @@
 syntax = "proto3";
 
-
 // Define the service
 service AcquisitionService {
     rpc acquire (AcquireRequest) returns (AcquireResponse);
+
+}
+service DisplayService {
     rpc display (DisplayRequest) returns (DisplayResponse);
 
 }

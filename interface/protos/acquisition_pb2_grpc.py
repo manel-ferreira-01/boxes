@@ -5,7 +5,7 @@ import warnings
 
 import acquisition_pb2 as acquisition__pb2
 
-GRPC_GENERATED_VERSION = '1.73.1'
+GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -40,11 +40,6 @@ class AcquisitionServiceStub(object):
                 request_serializer=acquisition__pb2.AcquireRequest.SerializeToString,
                 response_deserializer=acquisition__pb2.AcquireResponse.FromString,
                 _registered_method=True)
-        self.display = channel.unary_unary(
-                '/AcquisitionService/display',
-                request_serializer=acquisition__pb2.DisplayRequest.SerializeToString,
-                response_deserializer=acquisition__pb2.DisplayResponse.FromString,
-                _registered_method=True)
 
 
 class AcquisitionServiceServicer(object):
@@ -57,12 +52,6 @@ class AcquisitionServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def display(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_AcquisitionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -70,11 +59,6 @@ def add_AcquisitionServiceServicer_to_server(servicer, server):
                     servicer.acquire,
                     request_deserializer=acquisition__pb2.AcquireRequest.FromString,
                     response_serializer=acquisition__pb2.AcquireResponse.SerializeToString,
-            ),
-            'display': grpc.unary_unary_rpc_method_handler(
-                    servicer.display,
-                    request_deserializer=acquisition__pb2.DisplayRequest.FromString,
-                    response_serializer=acquisition__pb2.DisplayResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -115,6 +99,51 @@ class AcquisitionService(object):
             metadata,
             _registered_method=True)
 
+
+class DisplayServiceStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.display = channel.unary_unary(
+                '/DisplayService/display',
+                request_serializer=acquisition__pb2.DisplayRequest.SerializeToString,
+                response_deserializer=acquisition__pb2.DisplayResponse.FromString,
+                _registered_method=True)
+
+
+class DisplayServiceServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def display(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_DisplayServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'display': grpc.unary_unary_rpc_method_handler(
+                    servicer.display,
+                    request_deserializer=acquisition__pb2.DisplayRequest.FromString,
+                    response_serializer=acquisition__pb2.DisplayResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'DisplayService', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('DisplayService', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class DisplayService(object):
+    """Missing associated documentation comment in .proto file."""
+
     @staticmethod
     def display(request,
             target,
@@ -129,7 +158,7 @@ class AcquisitionService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/AcquisitionService/display',
+            '/DisplayService/display',
             acquisition__pb2.DisplayRequest.SerializeToString,
             acquisition__pb2.DisplayResponse.FromString,
             options,
