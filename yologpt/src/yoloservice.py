@@ -36,7 +36,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
         results = self.model(img)
 
         # Draw boxes on image + convert to BGR to use opencv
-        annotated_frame = cv2.cvtColor(results[0].plot(img=np.ascontiguousarray(results[0].orig_img),cv2.COLOR_RGB2BGR)
+        annotated_frame = cv2.cvtColor(results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),cv2.COLOR_RGB2BGR)
         # Encode image with boxes to bytes
         _, labeled_image_bytes = cv2.imencode('.jpg', annotated_frame)
 
