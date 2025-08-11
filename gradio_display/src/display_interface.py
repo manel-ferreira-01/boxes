@@ -20,7 +20,7 @@ class GradioDisplay:
             gr.Markdown("## gRPC Image Display")
             with gr.Row():
                 with gr.Column():
-                    self.image_input = gr.Image(label="Input Image",type="numpy",trigger_mode='once')
+                    self.image_input = gr.Image(label="Input Image",type="numpy",interactive=True)
                     self.label_input = gr.Textbox(label="Input,Labels")
                     refresh_btn = gr.Button("🔄 Run Pipeline ", elem_id="refresh-btn")
                 with gr.Column():
