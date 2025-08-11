@@ -41,7 +41,12 @@ class GradioDisplay:
             return None, "No image"
         print("update_display: vai guardar no matlab")
         #if there is an input image, process and wait for the answer
-        savemat(self.input_data_file,{"img":img,"label":label})
+        try:
+            savemat(self.input_data_file,{"img":img,"label":label})
+        except Exception as e:
+            print(f"Error in update_display SAVEMAT: {e}")
+            return None, "Error"
+
         while True:
             if os.path.exists(self.output_data_file):# Need to lock while loading
                aux=loadmat(self.output_data_file)
@@ -50,7 +55,7 @@ class GradioDisplay:
                self.label=aux["label"]
                return aux["img"],aux["label"]
             else:
-                time.sleep(1)
+                time.sleep(.1)
 
     def update(self, image_bytes: bytes, label: str):
         try:
@@ -59,7 +64,7 @@ class GradioDisplay:
             self.image = image_np
             self.label = label
         except Exception as e:
-            print(f"Error in acquire: {e}")
+            print(f"Error in update: {e}")
             image_np = np.full((500, 500, 3),255, dtype = np.uint8)
             label="Error"
             savemat(self.output_data_file,{"img":image_np,"label":label})
