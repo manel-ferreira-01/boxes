@@ -71,6 +71,7 @@ COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
 # Copy the service file and the utils to workspace
 # (rename service file to only service.py for generic usage)
 COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/service.py
+COPY --chown=${USER}:${GROUP} ${SRC}/display_interface.py ${WORKSPACE}/display_interface.py
 
 # Change to non-privileged user
 USER ${USER}
