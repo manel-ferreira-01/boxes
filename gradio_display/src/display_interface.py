@@ -37,6 +37,8 @@ class GradioDisplay:
     def _update_display(self,img,label):
 #if user input an image and clicked on button, store data to be sent by grpc
 # and wait for result of processing
+        if img is None:
+            return None, "No image"
         print("update_display: vai guardar no matlab")
         #if there is an input image, process and wait for the answer
         savemat(self.input_data_file,{"img":img,"label":label})
