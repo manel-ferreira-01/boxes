@@ -1,11 +1,9 @@
 version: '3'
 services:
   interface:
-    image: sipgisr/acquisition
+    image: sipgisr/gradio_display
     ports:
     - 7860:7860
-    - 8061:8061    
-    - 8161:8161
   yologpt:
     image: sipgisr/yolov11
     ports:
