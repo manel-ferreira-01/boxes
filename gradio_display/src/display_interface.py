@@ -4,6 +4,7 @@ import cv2
 from scipy.io import savemat, loadmat
 import os
 import time
+import logging
 
 class GradioDisplay:
     def __init__(self,tmp_data_folder="/tmp"):
@@ -26,15 +27,15 @@ class GradioDisplay:
                 with gr.Column():
                     self.image_output = gr.Image(label="Received Image", interactive=False)
                     self.label_output = gr.Textbox(label="Label", interactive=False)
-#   Metodos- Button click
+            #   Metodos- Button click
             refresh_btn.click(
-                fn=self._update_display,
+                fn=self._update_acquire,
                 inputs=[self.image_input,self.label_input],
                 outputs=[self.image_output, self.label_output]
             )
         return demo
 
-    def _update_display(self,img,label):
+    def _update_acquire(self,img,label):
 #if user input an image and clicked on button, store data to be sent by grpc
 # and wait for result of processing
         if img is None:
@@ -44,7 +45,7 @@ class GradioDisplay:
         try:
             savemat(self.input_data_file,{"img":img,"label":label})
         except Exception as e:
-            print(f"Error in update_display SAVEMAT: {e}")
+            logging.error(f"Error in update_display SAVEMAT: {e}")
             return None, "Error"
 
         while True:
@@ -52,7 +53,7 @@ class GradioDisplay:
                aux=loadmat(self.output_data_file)
                os.remove(self.output_data_file)
                self.image=aux["img"]
-               self.label=aux["label"]
+               self.label=json.loads(aux["label"])
                return aux["img"],aux["label"]
             else:
                 time.sleep(.1)
@@ -61,8 +62,6 @@ class GradioDisplay:
         try:
             image_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
             savemat(self.output_data_file,{"img":image_np,"label":label})
-            self.image = image_np
-            self.label = label
         except Exception as e:
             print(f"Error in update: {e}")
             image_np = np.full((500, 500, 3),255, dtype = np.uint8)
