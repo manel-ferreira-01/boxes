@@ -44,6 +44,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         else:
             time.sleep(1)
             annotations= {"empty":""}
+            
 
         label= json.dumps({"aispgradio":annotations})  
         _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8'))
