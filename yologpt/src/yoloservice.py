@@ -28,35 +28,34 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
         try:
             nparr = np.frombuffer(request.image, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[...,(2,1,0)]
+            # Run YOLO inference
+            results = self.model(img)
+            # Draw boxes on image + convert to BGR to use opencv
+            annotated_frame = cv2.cvtColor(results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),cv2.COLOR_RGB2BGR)
+            # Encode image with boxes to bytes
+            _, labeled_image_bytes = cv2.imencode('.jpg', annotated_frame)
+            # Extract detection results
+            detections = []
+            for r in results:
+                boxes = r.boxes
+                for b in boxes:
+                    box = b.xyxy[0].tolist()
+                    conf = float(b.conf)
+                    cls = int(b.cls)
+                    detections.append({
+                        "bbox": box,
+                        "confidence": conf,
+                        "class_id": cls
+                    })
+            #detections.append({"image": base64.b64encode(nparr).decode('utf-8')})
+            # Convert detections to JSON string
         except:
             logging.error('Image Not valid')
-            img= np.random.randint(255, size=(900,800,3),dtype=np.uint8)
+            labeled_image_bytes=np.array([],dtype='uint8').tobytes()
+            detections={"yoloerror":"Image not valid"}
+
+        detections_json = json.dumps([detections,json.loads(request.label)])
             
-        # Run YOLO inference
-        results = self.model(img)
-
-        # Draw boxes on image + convert to BGR to use opencv
-        annotated_frame = cv2.cvtColor(results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),cv2.COLOR_RGB2BGR)
-        # Encode image with boxes to bytes
-        _, labeled_image_bytes = cv2.imencode('.jpg', annotated_frame)
-
-        # Extract detection results
-        detections = []
-        for r in results:
-            boxes = r.boxes
-            for b in boxes:
-                box = b.xyxy[0].tolist()
-                conf = float(b.conf)
-                cls = int(b.cls)
-                detections.append({
-                    "bbox": box,
-                    "confidence": conf,
-                    "class_id": cls
-                })
-        #detections.append({"image": base64.b64encode(nparr).decode('utf-8')})
-        # Convert detections to JSON string
-        detections_json = json.dumps(detections)
-
         return yolo_pb2.YOLOResponse(
             labeled_image=labeled_image_bytes.tobytes(),
             detections_json=detections_json
