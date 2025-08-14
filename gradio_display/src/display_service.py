@@ -24,29 +24,37 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         self.input_count=0;
 
 
-    def acquire(self, request, context):
-        while True:
+    def acquire(self, request, context):       # while True:        for i in range(3):
         # Read in.mat if exists and returns grpc message
-            if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
-                try:
-                    aux=loadmat(self.gradio_display.input_data_file)
-                    os.remove(self.gradio_display.input_data_file)
-                    _, image_bytes = cv2.imencode('.jpg', aux["img"])
-                  #Add annotations: counting, datetime
-                    self.input_count=self.input_count+1
-                    annotations={"input_count":self.input_count,"timestamp": datetime.datetime.now().isoformat()}
-                    label= json.dumps(annotations)
-                    return display_pb2.AcquireResponse(label=label, image=image_bytes.tobytes())
-                except Exception as e:
-                    logging.error(f"Error in acquire: {e}")
-                    time.sleep(0.1)
-                    continue
-            else:
-                time.sleep(.1)
+        if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
+            try:
+                aux=loadmat(self.gradio_display.input_data_file)
+                os.remove(self.gradio_display.input_data_file)
+                _, image_bytes = cv2.imencode('.jpg', aux["img"])
+              #Add annotations: counting, datetime
+                self.input_count=self.input_count+1
+                annotations={"user":aux["label"],"input_count":self.input_count,"timestamp": datetime.datetime.now().isoformat()}
+                label= json.dumps({"aispgradio":annotations})
+                return display_pb2.AcquireResponse(label=label, image=image_bytes.tobytes())
+            except Exception as e:
+                logging.error(f"Error in acquire: {e}")
+                time.sleep(0.1)
+                annotations={"erroracquire":f"Error in acquire: {e}"}
+        else:
+            time.sleep(1)
+            annotations= {"empty":""}
+
+        label= json.dumps({"aispgradio":annotations})  
+        tmp=np.array([],dtype='uint8').tobytes()
+        return display_pb2.AcquireResponse(label=label, image=tmp)
 
 
     def display(self, request, context):
-        self.gradio_display.update(request.image, request.label)
+        label=json.loads(request.label)
+        try:
+            label['aispgradio']['empty']
+        except KeyError as error:
+            self.gradio_display.update(request.image, request.label)
         return display_pb2.DisplayResponse()
 
 # --- gRPC Server Launchers ---
