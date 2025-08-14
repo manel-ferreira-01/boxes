@@ -44,7 +44,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         else:
             time.sleep(1)
             annotations= {"empty":""}
-            
+
 
         label= json.dumps({"aispgradio":annotations})  
         _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8'))
@@ -53,9 +53,8 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
 
     def display(self, request, context):
         label=json.loads(request.label)
-        print(label)
+        logging.debug(f"label {label}")
         try:
-            
             label['aispgradio']['empty']
         except KeyError as error:
             self.gradio_display.update(request.image, request.label)
