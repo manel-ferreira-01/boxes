@@ -55,7 +55,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         label=json.loads(request.label)
         logging.error(f"label {label}")
         try:
-            label['aispgradio']['empty']
+            label[1]['aispgradio']['empty']
         #except KeyError as error:
         except Exception as e:
             logging.error(f"Vai fazer update {e}")
