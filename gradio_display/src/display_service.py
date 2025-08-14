@@ -45,7 +45,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
             annotations= {"empty":""}
 
         label= json.dumps({"aispgradio":annotations})  
-        tmp=np.array([],dtype='uint8').tobytes()
+        _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8')).tobytes()
         return display_pb2.AcquireResponse(label=label, image=tmp)
 
 
