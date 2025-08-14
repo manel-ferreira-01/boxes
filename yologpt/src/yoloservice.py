@@ -27,6 +27,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
         # Decode image from bytes
         try:
             nparr = np.frombuffer(request.image, np.uint8)
+            print(nparr.shape)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[...,(2,1,0)]
             # Run YOLO inference
             # Parse requests.yolo_config (will have config values and other stuff)
