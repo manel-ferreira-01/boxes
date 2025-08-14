@@ -52,7 +52,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             # Convert detections to JSON string
         except:
             logging.error('Image Not valid')
-            labeled_image_bytes=np.array([],dtype='uint8').tobytes()
+            _,labeled_image_bytes=cv2.imencode('jpg'.np.zeros((2,2,3),dtype='uint8'))
             detections={"yoloerror":"Image not valid"}
 
         detections_json = json.dumps([detections,json.loads(request.yolo_config_json)])
