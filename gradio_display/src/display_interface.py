@@ -64,7 +64,7 @@ class GradioDisplay:
             image_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
             savemat(self.output_data_file,{"img":image_np,"label":label})
         except Exception as e:
-            print(f"Error in update: {e}")
+            logging.error(f"Error in update: {e}")
             image_np = np.full((500, 500, 3),255, dtype = np.uint8)
             label="Error"
             savemat(self.output_data_file,{"img":image_np,"label":label})
