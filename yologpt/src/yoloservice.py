@@ -29,6 +29,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             nparr = np.frombuffer(request.image, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[...,(2,1,0)]
             # Run YOLO inference
+            # Parse requests.yolo_config (will have config values and other stuff)
             results = self.model(img)
             # Draw boxes on image + convert to BGR to use opencv
             annotated_frame = cv2.cvtColor(results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),cv2.COLOR_RGB2BGR)
@@ -54,7 +55,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             labeled_image_bytes=np.array([],dtype='uint8').tobytes()
             detections={"yoloerror":"Image not valid"}
 
-        detections_json = json.dumps([detections,json.loads(request.label)])
+        detections_json = json.dumps([detections,json.loads(request.yolo_config_json_)])
             
         return yolo_pb2.YOLOResponse(
             labeled_image=labeled_image_bytes.tobytes(),

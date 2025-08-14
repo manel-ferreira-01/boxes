@@ -8,7 +8,7 @@ service YOLOservice {
 }
 
 message YOLORequest {
-  string yolo_config = 1;
+  string yolo_config_json = 1;
   bytes image = 2;
 }
 
