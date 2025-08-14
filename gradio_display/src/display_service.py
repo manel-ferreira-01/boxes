@@ -52,7 +52,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
 
     def display(self, request, context):
         label=json.loads(request.label)
-        print(Label)
+        print(label)
         try:
             
             label['aispgradio']['empty']
