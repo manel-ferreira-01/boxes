@@ -1,3 +1,4 @@
+from tkinter import LabelFrame
 import grpc
 from concurrent import futures
 import grpc_reflection.v1alpha.reflection as grpc_reflection
@@ -51,7 +52,9 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
 
     def display(self, request, context):
         label=json.loads(request.label)
+        print(Label)
         try:
+            
             label['aispgradio']['empty']
         except KeyError as error:
             self.gradio_display.update(request.image, request.label)
