@@ -53,10 +53,12 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
 
     def display(self, request, context):
         label=json.loads(request.label)
-        logging.debug(f"label {label}")
+        logging.error(f"label {label}")
         try:
             label['aispgradio']['empty']
-        except KeyError as error:
+        #except KeyError as error:
+        except Exception as e:
+            logging.error(f"Vai fazer update {e}")
             self.gradio_display.update(request.image, request.label)
         return display_pb2.DisplayResponse()
 
