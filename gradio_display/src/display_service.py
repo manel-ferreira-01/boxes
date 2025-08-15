@@ -34,7 +34,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                 _, image_bytes = cv2.imencode('.jpg', aux["img"])
               #Add annotations: counting, datetime
                 self.input_count=self.input_count+1
-                annotations={"user":aux["label"],"input_count":self.input_count,"timestamp": datetime.datetime.now().isoformat()}
+                annotations={"user":aux["label"].tostring(),"input_count":self.input_count,"timestamp": datetime.datetime.now().isoformat()}
                 label= json.dumps({"aispgradio":annotations})
                 return display_pb2.AcquireResponse(label=label, image=image_bytes.tobytes())
             except Exception as e:
