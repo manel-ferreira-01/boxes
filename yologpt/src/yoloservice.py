@@ -57,7 +57,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             detections={"yoloerror":"Image not valid"}
 
         detections_json = json.dumps([detections,json.loads(request.yolo_config_json)])
-            
+        logging.info(f"{detections_json}")    
         return yolo_pb2.YOLOResponse(
             labeled_image=labeled_image_bytes.tobytes(),
             detections_json=detections_json
