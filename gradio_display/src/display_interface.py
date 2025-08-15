@@ -54,7 +54,7 @@ class GradioDisplay:
                aux=loadmat(self.output_data_file)
                os.remove(self.output_data_file)
                self.image=aux["img"]
-               self.label=json.loads(aux["label"])
+               self.label=json.loads(aux["label"].tolist())
                return aux["img"],aux["label"]
             else:
                 time.sleep(.1)
