@@ -55,9 +55,10 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         label=json.loads(request.label)
         
         for l in label:
-            if "aispgradio" in l.keys():
-                if "empty" in l['aispgradio']:
-                    return display_pb2.DisplayResponse()
+            if type(l) is dict:
+                if "aispgradio" in l.keys():
+                    if "empty" in l['aispgradio']:
+                        return display_pb2.DisplayResponse()
         self.gradio_display.update(request.image, request.label)   
         return display_pb2.DisplayResponse()
 
