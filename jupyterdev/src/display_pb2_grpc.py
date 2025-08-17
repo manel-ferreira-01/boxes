@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import yolo_pb2 as yolo__pb2
+import display_pb2 as display__pb2
 
-GRPC_GENERATED_VERSION = '1.73.1'
+GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,14 +18,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in yolo_pb2_grpc.py depends on'
+        + f' but the generated code in display_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class YOLOserviceStub(object):
+class DisplayServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -34,59 +34,59 @@ class YOLOserviceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.Detect = channel.unary_unary(
-                '/yolo.YOLOservice/Detect',
-                request_serializer=yolo__pb2.YOLORequest.SerializeToString,
-                response_deserializer=yolo__pb2.YOLOResponse.FromString,
+        self.display = channel.unary_unary(
+                '/DisplayService/display',
+                request_serializer=display__pb2.DisplayRequest.SerializeToString,
+                response_deserializer=display__pb2.DisplayResponse.FromString,
                 _registered_method=True)
-        self.Track = channel.unary_unary(
-                '/yolo.YOLOservice/Track',
-                request_serializer=yolo__pb2.YOLOTrackRequest.SerializeToString,
-                response_deserializer=yolo__pb2.YOLOResponse.FromString,
+        self.acquire = channel.unary_unary(
+                '/DisplayService/acquire',
+                request_serializer=display__pb2.AcquireRequest.SerializeToString,
+                response_deserializer=display__pb2.AcquireResponse.FromString,
                 _registered_method=True)
 
 
-class YOLOserviceServicer(object):
+class DisplayServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def Detect(self, request, context):
+    def display(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Track(self, request, context):
+    def acquire(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_YOLOserviceServicer_to_server(servicer, server):
+def add_DisplayServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Detect': grpc.unary_unary_rpc_method_handler(
-                    servicer.Detect,
-                    request_deserializer=yolo__pb2.YOLORequest.FromString,
-                    response_serializer=yolo__pb2.YOLOResponse.SerializeToString,
+            'display': grpc.unary_unary_rpc_method_handler(
+                    servicer.display,
+                    request_deserializer=display__pb2.DisplayRequest.FromString,
+                    response_serializer=display__pb2.DisplayResponse.SerializeToString,
             ),
-            'Track': grpc.unary_unary_rpc_method_handler(
-                    servicer.Track,
-                    request_deserializer=yolo__pb2.YOLOTrackRequest.FromString,
-                    response_serializer=yolo__pb2.YOLOResponse.SerializeToString,
+            'acquire': grpc.unary_unary_rpc_method_handler(
+                    servicer.acquire,
+                    request_deserializer=display__pb2.AcquireRequest.FromString,
+                    response_serializer=display__pb2.AcquireResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'yolo.YOLOservice', rpc_method_handlers)
+            'DisplayService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('yolo.YOLOservice', rpc_method_handlers)
+    server.add_registered_method_handlers('DisplayService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class YOLOservice(object):
+class DisplayService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def Detect(request,
+    def display(request,
             target,
             options=(),
             channel_credentials=None,
@@ -99,9 +99,9 @@ class YOLOservice(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/yolo.YOLOservice/Detect',
-            yolo__pb2.YOLORequest.SerializeToString,
-            yolo__pb2.YOLOResponse.FromString,
+            '/DisplayService/display',
+            display__pb2.DisplayRequest.SerializeToString,
+            display__pb2.DisplayResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -113,7 +113,7 @@ class YOLOservice(object):
             _registered_method=True)
 
     @staticmethod
-    def Track(request,
+    def acquire(request,
             target,
             options=(),
             channel_credentials=None,
@@ -126,9 +126,9 @@ class YOLOservice(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/yolo.YOLOservice/Track',
-            yolo__pb2.YOLOTrackRequest.SerializeToString,
-            yolo__pb2.YOLOResponse.FromString,
+            '/DisplayService/acquire',
+            display__pb2.AcquireRequest.SerializeToString,
+            display__pb2.AcquireResponse.FromString,
             options,
             channel_credentials,
             insecure,

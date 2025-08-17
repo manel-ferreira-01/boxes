@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+service DisplayService {
+  rpc display (DisplayRequest) returns (DisplayResponse);
+  rpc acquire (AcquireRequest) returns (AcquireResponse);
+}
+// Define an empty request message
+message AcquireRequest {}
+
+// Define the response message
+message AcquireResponse {
+    string label = 1; // json string with gradio session or commands
+    bytes image = 2; // image encoded as bytes (e.g., PNG or JPEG)
+}
+
+message DisplayRequest {
+  string label = 1;
+  bytes image = 2;
+}
+
+message DisplayResponse {}
+
+//python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto

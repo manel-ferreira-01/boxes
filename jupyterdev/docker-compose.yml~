@@ -1,0 +1,10 @@
+services:
+  interface:
+    image: quay.io/jupyter/scipy-notebook
+    ports:
+    - 7860:7860
+    - 8888:8888
+    volumes:
+      - type: bind
+        source: ./
+        target: /home/jovyan/work/workspace

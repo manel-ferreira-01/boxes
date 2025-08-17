@@ -6,25 +6,15 @@ import os
 import time
 import logging
 import json
-import threading
-
-
 
 class GradioDisplay:
-    def __init__(self,tmp_data_folder="/tmp",lockfile=None):
+    def __init__(self,tmp_data_folder="/tmp"):
         # self.(gradio) image_input, label_input,image_outpu,label_output
         self.image = None
         self.label = "User label"
         self.input_data_file=tmp_data_folder+"/in.mat"
         self.output_data_file=tmp_data_folder+"/out.mat"
-        self.lock=lockfile
         self.interface = self._create_interface()
-        if os.path.exists(self.input_data_file):
-            os.remove(self.input_data_file)
-        if os.path.exists(self.output_data_file):
-            os.remove(self.output_data_file)
-        
-            
 
     def _create_interface(self):
 
@@ -47,52 +37,39 @@ class GradioDisplay:
         return demo
 
     def _update_acquire(self,img,label):
-    #if user input an image and clicked on button, store data to be sent by grpc
-    # and wait for result of processing
+#if user input an image and clicked on button, store data to be sent by grpc
+# and wait for result of processing
         if img is None:
             return None, "No image"
+        print("update_display: vai guardar no matlab")
         #if there is an input image, process and wait for the answer
         try:
-#            print("UPDATEACQUIRE: vai ao lock")
-            with self.lock:
-                savemat(self.input_data_file,{"img":img,"label":label})
- #           print("UPDATEACQUIRE: saiu do lock")
+            savemat(self.input_data_file,{"img":img,"label":label})
         except Exception as e:
             logging.error(f"Error in update_display SAVEMAT: {e}")
-            return None, f"Error in update_display SAVEMAT: {e}"
+            return None, "Error"
 
         while True:
-            try:
-                if os.path.exists(self.output_data_file):# Need to lock while loading
-                    #time.sleep(2)
-#                    print("UPDATEACQUIRE: vai ao segundo lock")
-                    with self.lock:
-                        aux=loadmat(self.output_data_file)
-                        os.remove(self.output_data_file)
-#                    print("UPDATEACQUIRE: saiu do segunbdo lock")
-                    return aux["img"],json.loads(aux["label"].tobytes())
-                else:
-                    time.sleep(.1)
-            except Exception as e:
-                logging.error(f"UPDATE_ACQUIRE: Error during loadmat: {e}")
-        #------------- print ---------
-#                print(f"UPDATE_ACQUIRE erro {e}")
-                time.sleep(10)
-                return None,"Error in data"
+            if os.path.exists(self.output_data_file):# Need to lock while loading
+               aux=loadmat(self.output_data_file)
+               os.remove(self.output_data_file)
+               self.image=aux["img"]
+               self.label=aux["label"]
+               return aux["img"],aux["label"]
+            else:
+                time.sleep(.1)
 
     def update(self, image_bytes: bytes, label: str):
         try:
             image_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
-#            print("UPDATE: vai ao lock")
-            with self.lock:
-                savemat(self.output_data_file,{"img":image_np,"label":label})
-#            print("UPDATE: Saiu do  lock")
+            savemat(self.output_data_file,{"img":image_np,"label":label})
         except Exception as e:
             logging.error(f"Error in update: {e}")
             image_np = np.full((500, 500, 3),255, dtype = np.uint8)
             label="Error"
-            with self.lock:
-                savemat(self.output_data_file,{"img":image_np,"label":label})
+            savemat(self.output_data_file,{"img":image_np,"label":label})
+            self.image = image_np            
+            self.label = label
 
     def launch(self,share=True, server_name="0.0.0.0", server_port=7860):
         self.interface.launch(share=share, server_name=server_name, server_port=server_port)
