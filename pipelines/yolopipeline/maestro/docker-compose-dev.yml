@@ -1,8 +1,13 @@
 services:
   interface:
-    image: sipgisr/gradio_display
+    image: sipgisr/jupyterdev
     ports:
     - 7860:7860
+    - 8888:8888
+    volumes:
+      - type: bind
+        source: /home/jpc/aisp/boxes
+        target: /home/jovyan/work/workspace
   yologpt:
     image: sipgisr/yolov11
     ports:

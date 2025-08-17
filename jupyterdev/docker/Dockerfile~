@@ -1,0 +1,26 @@
+FROM quay.io/jupyter/scipy-notebook
+USER root
+RUN apt -y update \
+ && apt -y install \
+      less \
+      gnuplot \
+      libnetcdf-dev \
+      octave \
+      liboctave-dev \
+      git \
+ && apt clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install requirements
+COPY requirements.txt .
+
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Expose port 8061 according to ai4eu specifications
+EXPOSE 8061 8888 7860
+
+#WORKDIR ${WORKSPACE}
+USER jovyan
+#CMD ["jupyter","lab","--allow-root"]
+#CMD ["start-notebook.py", "--NotebookApp.token='jupyter']

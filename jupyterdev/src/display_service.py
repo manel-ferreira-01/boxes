@@ -15,9 +15,7 @@ import os
 import time
 import threading
 
-lock = threading.Lock()
 # --- Configuration ---
-
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
@@ -26,20 +24,17 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         self.gradio_display = gradio_display
         self.input_count=0;
 
+
     def acquire(self, request, context):       # while True:        for i in range(3):
         # Read in.mat if exists and returns grpc message
         if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
             try:
-#                print("ACQUIRE: Vai fazer o lock")
-                with lock:
-                    aux=loadmat(self.gradio_display.input_data_file)
-                    os.remove(self.gradio_display.input_data_file)
-#                print("ACQUIRE: saiu lock")
+                aux=loadmat(self.gradio_display.input_data_file)
+                os.remove(self.gradio_display.input_data_file)
                 _, image_bytes = cv2.imencode('.jpg', aux["img"])
               #Add annotations: counting, datetime
                 self.input_count=self.input_count+1
-                annotations={"user":np.array2string(aux["label"]),"input_count":self.input_count,
-                             "timestamp":datetime.datetime.now().isoformat()}
+                annotations={"user":np.array2string(aux["label"]),"input_count":self.input_count,"timestamp": datetime.datetime.now().isoformat()}
                 label= json.dumps({"aispgradio":annotations})
                 return display_pb2.AcquireResponse(label=label, image=image_bytes.tobytes())
             except Exception as e:
@@ -47,9 +42,9 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                 time.sleep(0.1)
                 annotations={"erroracquire":f"Error in acquire: {e}"}
         else:
-            time.sleep(2)
+            time.sleep(1)
             annotations= {"empty":""}
-            
+
 
         label= json.dumps({"aispgradio":annotations})  
         _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8'))
@@ -64,7 +59,6 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                 if "aispgradio" in l.keys():
                     if "empty" in l['aispgradio']:
                         return display_pb2.DisplayResponse()
-        
         self.gradio_display.update(request.image, request.label)   
         return display_pb2.DisplayResponse()
 
@@ -93,7 +87,7 @@ if __name__ == "__main__":
         options= [('grpc.max_send_message_length', 512 * 1024 * 1024), 
                   ('grpc.max_receive_message_length', 512 * 1024 * 1024)])
 #__ Create Gradio services __ 
-    gradio_display = GradioDisplay(tmp_data_folder="/tmp",lockfile=lock)
+    gradio_display = GradioDisplay(tmp_data_folder="/tmp")
 
 # -- Add service 
     display_pb2_grpc.add_DisplayServiceServicer_to_server(DisplayService(gradio_display), server)
