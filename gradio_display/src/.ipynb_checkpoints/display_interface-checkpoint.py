@@ -64,8 +64,6 @@ class GradioDisplay:
         while True:
             try:
                 if os.path.exists(self.output_data_file):# Need to lock while loading
-                    #time.sleep(2)
-#                    print("UPDATEACQUIRE: vai ao segundo lock")
                     with self.lock:
                         aux=loadmat(self.output_data_file)
                         os.remove(self.output_data_file)

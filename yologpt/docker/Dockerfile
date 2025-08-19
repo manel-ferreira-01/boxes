@@ -15,8 +15,8 @@ ARG PROTO_FILE
 ARG PROTOS_FOLDER_DIR=protos
 
 RUN apt-get update && apt-get install -y \
-    wget && \
-    wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt 
+    wget  && \
+    wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt
 
 RUN pip install --upgrade pip && \
     pip install grpcio grpcio-tools protobuf
@@ -47,13 +47,14 @@ RUN addgroup --system ${GROUP} && \
     adduser --system --ingroup ${GROUP} ${USER} && \
     chown -R ${USER}:${GROUP} ${WORKSPACE}
 # Install OS dependencies
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+#RUN apt-get update && apt-get install -y \
+#    libgl1-mesa-glx \
+#    libglib2.0-0 \
+#    && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y   libgl1-mesa-glx libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
-    pip install grpcio grpcio-reflection ultralytics opencv-python
+    pip install grpcio grpcio-reflection ultralytics opencv-python-headless
 #    pip install grpcio==1.35.0 grpcio-reflection==1.35.0 ultralytics opencv-python
 
 # COPY .proto file to root to meet ai4eu specifications
