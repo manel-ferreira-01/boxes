@@ -1,7 +1,0 @@
-grpcio
-protobuf
-grpcio-reflection
-opencv-python-headless
-numpy
-scipy
-gradio
