@@ -7,11 +7,11 @@ import time
 import logging
 import json
 import threading
-
+import pickle
 
 
 class GradioDisplay:
-    def __init__(self,tmp_data_folder="/tmp",lockfile=None):
+    def __init__(self,tmp_data_folder="/dev/shm",lockfile=None):
         # self.(gradio) image_input, label_input,image_outpu,label_output
         self.image = None
         self.label = "User label"
@@ -54,6 +54,7 @@ class GradioDisplay:
                     outputs=[self.image_output, self.label_output]
                 )
 #---------------- TAB Gallery para sequencias -----------------
+
             with gr.Tab("Yolo Image Sequence"):
                 with gr.Row():
                     with gr.Column():
@@ -63,18 +64,48 @@ class GradioDisplay:
                             run_yolo_detseq_btn = gr.Button("🔄 Detect Objects")
                             run_yolo_trackseq_btn = gr.Button("🔄 Track Objects")
                     with gr.Column():
-                        self.image_output_gallery = gr.Gallery(label="Detected Objects")
+                        self.image_output_gallery = gr.Gallery(label="Detected Objects",type="numpy")
                         self.label_output_gallery = gr.Textbox(label="Messages and Data", interactive=False)
                 #   Metodos- Button click
                 run_yolo_detseq_btn.click(
-                    fn=self._update_acquire,
+                    fn=self._update_sequence,
                     inputs=[self.image_input_gallery,self.label_input_gallery],
                     outputs=[self.image_output_gallery, self.label_output_gallery]
                 )            
         return demo
 #----------  Update ---------------
-    def _update_sequence(self,imseq,text):
-        return None
+    def _update_sequence(self,img,label):
+        
+        if img is None:
+            return None, "No image"
+        #if there is an input image, process and wait for the answer
+        try:
+            with self.lock:    
+                with open(self.input_data_file, 'wb') as f:
+                    pickle.dump({"gradio":[img,label],"command":"sequence"},f)    
+        except Exception as e:
+            logging.error(f"Error in update_sequence SAVEMAT: {e}")
+            return None, f"Error in update_sequence SAVEMAT: {e}"
+        print("SAVED IMAGE ON PICKLE FILE")    
+#------wait for response of the pipeline (imgs and json) -----------     
+        while True:
+            try:
+                if os.path.exists(self.output_data_file):# Need to lock while loading
+                    print("-----Images do DISPLAY ------")
+                    with self.lock:
+                        with open(self.output_data_file, 'rb') as f:
+                            ret_data=pickle.load(f)
+                        os.remove(self.output_data_file)
+                        print(type(ret_data))
+                    return ret_data[0],json.loads(ret_data[1])
+                else:
+                    time.sleep(.1)
+            except Exception as e:
+                logging.error(f"UPDATE_ACQUIRE: Error during loadmat: {e}")
+                time.sleep(10)
+                return None,"Error in data"
+
+        
     def _update_acquire(self,img,label):
     #if user input an image and clicked on button, store data to be sent by grpc
     # and wait for result of processing
@@ -83,41 +114,43 @@ class GradioDisplay:
         #if there is an input image, process and wait for the answer
         try:
             with self.lock:
+                
                 with open(self.input_data_file, 'wb') as f:
-                    pickle.dump([img,label],f)    
+                    pickle.dump({"gradio":[[img],label],"command":"single"},f)    
 #                savemat(self.input_data_file,{"img":img,"label":label})
         except Exception as e:
-            logging.error(f"Error in update_display SAVEMAT: {e}")
-            return None, f"Error in update_display SAVEMAT: {e}"
-            
-#------wait for response of the pipeline (imgs and json) -----------
-        
+            logging.error(f"Error in update_acquire SAVEMAT: {e}")
+            return None, f"Error in update_acquire SAVEMAT: {e}"
+#------wait for response of the pipeline (imgs and json) -----------     
         while True:
             try:
                 if os.path.exists(self.output_data_file):# Need to lock while loading
                     with self.lock:
-                        aux=loadmat(self.output_data_file)
+                        with open(self.output_data_file, 'rb') as f:
+                            ret_data=pickle.load(f)
                         os.remove(self.output_data_file)
-                    return aux["img"],json.dumps(json.loads(aux["label"].tobytes()),indent=4)
+                    return ret_data[0],json.dumps(json.loads(ret_data[1]),indent=4)
                 else:
                     time.sleep(.1)
             except Exception as e:
                 logging.error(f"UPDATE_ACQUIRE: Error during loadmat: {e}")
-                time.sleep(10)
+                time.sleep(1)
                 return None,"Error in data"
 
     def update(self, image_bytes: bytes, label: str):
         try:
             image_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
             with self.lock:
-                savemat(self.output_data_file,{"img":image_np,"label":label})
+                 with open(self.output_data_file, 'wb') as f:
+                    pickle.dump([image_np,label],f)  
         except Exception as e:
             logging.error(f"Error in update: {e}")
             image_np = np.full((500, 500, 3),255, dtype = np.uint8)
             label="Error"
             with self.lock:
                 savemat(self.output_data_file,{"img":image_np,"label":label})
-                
+
+            
 #----------- 
     def launch(self,share=True, server_name="0.0.0.0", server_port=7860):
         self.interface.launch(share=share, server_name=server_name, server_port=server_port)

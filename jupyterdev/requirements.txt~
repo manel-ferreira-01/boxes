@@ -1,9 +1,0 @@
-grpcio
-grpcio-utils
-protobuf
-grpcio-reflection
-opencv-python-headless
-numpy
-scipy
-gradio
-octave_kernel
