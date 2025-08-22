@@ -68,7 +68,88 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             labeled_image=labeled_image_bytes.tobytes(),
             detections_json=detections_json
         )
+    
+    def DetectSequence(self, request, context):
+        """
+        Process multiple images from request.images (repeated bytes),
+        run YOLO inference, return annotated images and detections.
+        """
+        annotated_images = []
+        all_detections = []  # list of lists (per-image detections)
+        try:
+            # Check if there is any command and if it empty
+            if request.yolo_config_json:
+                label=json.loads(request.yolo_config_json)
+                for l in label:
+                    if type(l) is dict:
+                        if "aispgradio" in l.keys():
+                            if "empty" in l['aispgradio'].keys():
+                                return yolo_pb2.YOLOGradioSeq(
+                                    images=[bytes(1)],
+                                    yolo_config_json=request.yolo_config_json
+                                )
+                            elif "yoloconfig" in l['aispgradio']:
+                                print(f"Yolo Configuration parameters {l['aispgradio']['yoloconfig']}")
+                                #extract yoloconfig parameters here
+            else:
+               logging.error(f'----label is empty {request.yolo_config_json}  ')
+                
+    
+            # Process each image
+            for img_bytes in request.images:
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[..., (2, 1, 0)]  # BGR→RGB
+                    
+                # Run YOLO inference
+                results = self.model(img)
+    
+                # Annotate result
+                annotated_frame = cv2.cvtColor(
+                    results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),
+                    cv2.COLOR_RGB2BGR
+                )
+                _, labeled_image_bytes = cv2.imencode('.jpg', annotated_frame)
+                annotated_images.append(labeled_image_bytes.tobytes())
+    
+                # Collect detections
+                detections_for_img = []
+                for r in results:
+                    for b in r.boxes:
+                        detections_for_img.append({
+                            "bbox": b.xyxy[0].tolist(),
+                            "confidence": float(b.conf),
+                            "class_id": int(b.cls)
+                        })
+                if not detections_for_img:
+                    detections_for_img = [{"no objects": ""}]
+    
+                all_detections.append(detections_for_img)
+    
+        except Exception as e:
+            logging.error(f'DETECT: Image processing error: {e}')
+            _, labeled_image_bytes = cv2.imencode('.jpg', np.zeros((2, 2, 3), dtype='uint8'))
+            annotated_images = [labeled_image_bytes.tobytes()]
+            all_detections = {"ErrorYolo": "DETECT: Image not valid"}
+    
+        # Build detections JSON
+        if request.yolo_config_json:
+#            print("LABEL ----")
+#            print(label)
+            label.append({"YOLO": all_detections})
+            detections_json = json.dumps(label)
+ #           print(detections_json)
+ #           print("DETECTIONS-----")
+        else:
+            detections_json = json.dumps([{"YOLO": all_detections}])
 
+ #       print("------------returning from YOLO ---- ")
+        
+        return yolo_pb2.YOLOGradioSeq(
+            images=annotated_images,
+            yolo_config_json=detections_json
+        )
+    
+    
     def Track(self, request, context):
             # Decode image
             frame = cv2.imdecode(np.frombuffer(request.image, np.uint8), cv2.IMREAD_COLOR)
@@ -139,8 +220,8 @@ if __name__ == "__main__":
     #Create Server and add service
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10),
-        options= [('grpc.max_send_message_length', 512 * 1024 * 1024), 
-                  ('grpc.max_receive_message_length', 512 * 1024 * 1024)])
+        options= [('grpc.max_send_message_length', 1024 * 1024 * 1024), 
+                  ('grpc.max_receive_message_length', 1024 * 1024 * 1024)])
     
     yolo_pb2_grpc.add_YOLOserviceServicer_to_server(YOLOServiceServicer(), server)
 
