@@ -33,10 +33,13 @@ class GradioDisplay:
         with gr.Blocks() as demo:
             gr.Markdown(""" ## The Signal and Image Processing Group Computer Vision Toolbox ![](https://sipg.isr.tecnico.ulisboa.pt/wp-content/uploads/2018/03/cropped-SIGP_logo_blue-copy_1x1.png)
             
-            ## This website runs a set of algorithms on data uploaded buy users.
+            ## This website runs a set of algorithms on data uploaded buy users. Main tasks:
             
             - Detection of objects (YOLO) 
-            - Tracking objects in sequences """)
+            - Tracking objects in sequences(To Be Released Soon!) 
+            
+            Support by ![](https://www.licentivos.pt/wp-content/uploads/2024/02/PRR.png) and others !""")
+
 #---------------- TAB  imagem simples -----------------
             with gr.Tab("Yolo Single Image"):
                 with gr.Row():
