@@ -5,27 +5,14 @@ syntax = "proto3";
 package yolo;
 
 service YOLOservice {
-  rpc Detect (YOLORequest) returns (YOLOResponse);
-  rpc Track (YOLOTrackRequest) returns (YOLOResponse);
+  rpc TrackSequence(YOLOGradioSeq) returns (YOLOGradioSeq);
   rpc DetectSequence(YOLOGradioSeq) returns (YOLOGradioSeq);
+  rpc AllProcessing(YOLOGradioSeq) returns (YOLOGradioSeq);
 }
+
 message YOLOGradioSeq {
   string yolo_config_json = 1;
   repeated bytes images = 2;
+  bytes video = 3;
 }
 
-
-message YOLORequest {
-  string yolo_config_json = 1;
-  bytes image = 2;
-}
-
-message YOLOResponse {
-  string detections_json = 1;
-  bytes labeled_image = 2;
-}
-
-message YOLOTrackRequest {
-  string track_config_json = 1; // JSON string with YOLO tracking args
-  bytes image = 2;              // JPEG image frame
-}

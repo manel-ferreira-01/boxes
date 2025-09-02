@@ -5,7 +5,7 @@ import warnings
 
 import yolo_pb2 as yolo__pb2
 
-GRPC_GENERATED_VERSION = '1.74.0'
+GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -34,18 +34,18 @@ class YOLOserviceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.Detect = channel.unary_unary(
-                '/yolo.YOLOservice/Detect',
-                request_serializer=yolo__pb2.YOLORequest.SerializeToString,
-                response_deserializer=yolo__pb2.YOLOResponse.FromString,
-                _registered_method=True)
-        self.Track = channel.unary_unary(
-                '/yolo.YOLOservice/Track',
-                request_serializer=yolo__pb2.YOLOTrackRequest.SerializeToString,
-                response_deserializer=yolo__pb2.YOLOResponse.FromString,
+        self.TrackSequence = channel.unary_unary(
+                '/yolo.YOLOservice/TrackSequence',
+                request_serializer=yolo__pb2.YOLOGradioSeq.SerializeToString,
+                response_deserializer=yolo__pb2.YOLOGradioSeq.FromString,
                 _registered_method=True)
         self.DetectSequence = channel.unary_unary(
                 '/yolo.YOLOservice/DetectSequence',
+                request_serializer=yolo__pb2.YOLOGradioSeq.SerializeToString,
+                response_deserializer=yolo__pb2.YOLOGradioSeq.FromString,
+                _registered_method=True)
+        self.AllProcessing = channel.unary_unary(
+                '/yolo.YOLOservice/AllProcessing',
                 request_serializer=yolo__pb2.YOLOGradioSeq.SerializeToString,
                 response_deserializer=yolo__pb2.YOLOGradioSeq.FromString,
                 _registered_method=True)
@@ -54,13 +54,7 @@ class YOLOserviceStub(object):
 class YOLOserviceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def Detect(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Track(self, request, context):
+    def TrackSequence(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -72,21 +66,27 @@ class YOLOserviceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AllProcessing(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_YOLOserviceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Detect': grpc.unary_unary_rpc_method_handler(
-                    servicer.Detect,
-                    request_deserializer=yolo__pb2.YOLORequest.FromString,
-                    response_serializer=yolo__pb2.YOLOResponse.SerializeToString,
-            ),
-            'Track': grpc.unary_unary_rpc_method_handler(
-                    servicer.Track,
-                    request_deserializer=yolo__pb2.YOLOTrackRequest.FromString,
-                    response_serializer=yolo__pb2.YOLOResponse.SerializeToString,
+            'TrackSequence': grpc.unary_unary_rpc_method_handler(
+                    servicer.TrackSequence,
+                    request_deserializer=yolo__pb2.YOLOGradioSeq.FromString,
+                    response_serializer=yolo__pb2.YOLOGradioSeq.SerializeToString,
             ),
             'DetectSequence': grpc.unary_unary_rpc_method_handler(
                     servicer.DetectSequence,
+                    request_deserializer=yolo__pb2.YOLOGradioSeq.FromString,
+                    response_serializer=yolo__pb2.YOLOGradioSeq.SerializeToString,
+            ),
+            'AllProcessing': grpc.unary_unary_rpc_method_handler(
+                    servicer.AllProcessing,
                     request_deserializer=yolo__pb2.YOLOGradioSeq.FromString,
                     response_serializer=yolo__pb2.YOLOGradioSeq.SerializeToString,
             ),
@@ -102,7 +102,7 @@ class YOLOservice(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def Detect(request,
+    def TrackSequence(request,
             target,
             options=(),
             channel_credentials=None,
@@ -115,36 +115,9 @@ class YOLOservice(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/yolo.YOLOservice/Detect',
-            yolo__pb2.YOLORequest.SerializeToString,
-            yolo__pb2.YOLOResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Track(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/yolo.YOLOservice/Track',
-            yolo__pb2.YOLOTrackRequest.SerializeToString,
-            yolo__pb2.YOLOResponse.FromString,
+            '/yolo.YOLOservice/TrackSequence',
+            yolo__pb2.YOLOGradioSeq.SerializeToString,
+            yolo__pb2.YOLOGradioSeq.FromString,
             options,
             channel_credentials,
             insecure,
@@ -170,6 +143,33 @@ class YOLOservice(object):
             request,
             target,
             '/yolo.YOLOservice/DetectSequence',
+            yolo__pb2.YOLOGradioSeq.SerializeToString,
+            yolo__pb2.YOLOGradioSeq.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AllProcessing(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/yolo.YOLOservice/AllProcessing',
             yolo__pb2.YOLOGradioSeq.SerializeToString,
             yolo__pb2.YOLOGradioSeq.FromString,
             options,

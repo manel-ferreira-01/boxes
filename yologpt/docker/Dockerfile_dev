@@ -1,0 +1,27 @@
+
+FROM sipgisr/yolov11:mac
+# Renew build args
+
+ARG USER=worker
+ARG GROUP=workers
+ARG WORKSPACE=/workspace
+ARG PROTO_FILE=yolo.proto
+ARG SRC_DIR=src
+ARG DEV_DIR=dev
+
+WORKDIR ${WORKSPACE}/
+
+# Copy code
+COPY --chown=${USER}:${GROUP} ${DEV_DIR}/waitservice.py .
+
+# Change to non-privileged user
+USER ${USER}
+
+ENV HOME=/home/${USER}
+
+# Expose port 8061 according to ai4eu specifications
+EXPOSE 8061
+
+WORKDIR ${WORKSPACE}/
+
+CMD ["python", "waitservice.py"]
