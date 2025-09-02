@@ -5,8 +5,8 @@ spec:
 kind: stage
 spec:
   name: Yolodetect
-  method: DetectSequence
-  address: interface:8061
+  method: AllProcessing
+  address: yologpt:8061
   pipeline: Yolo
 ---
 kind: stage

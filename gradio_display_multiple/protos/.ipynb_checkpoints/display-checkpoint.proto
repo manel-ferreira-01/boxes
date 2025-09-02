@@ -13,11 +13,13 @@ message AcquireRequest {}
 message AcquireResponse {
     string label = 1; // json string with gradio session or commands
     repeated bytes image = 2; // image encoded as bytes (e.g., PNG or JPEG)
+    bytes video = 3;
 }
 
 message DisplayRequest {
   string label = 1;
   repeated bytes image = 2;
+  bytes video = 3;
 }
 
 message DisplayResponse {}
