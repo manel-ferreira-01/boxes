@@ -6,7 +6,7 @@ https://github.com/facebookresearch/vggt.git
 Keep the service name as simplebox if you want to keep all files untouched (protos, gprc, protobuf)
 
 ```bash
-$ docker build --tag sipgisr/vggtGrpc: --build-arg SERVICE_NAME=simplebox -f docker/Dockerfile .
+$ docker build --tag sipgisr/vggtgrpc --build-arg SERVICE_NAME=simplebox -f docker/Dockerfile .
 ```
 
 ### Data format 

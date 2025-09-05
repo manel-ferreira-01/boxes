@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+service VGGTService {
+rpc Forward(VGGTRequest) returns (VGGTResponse);
+}
+
+message VGGTRequest {
+    repeated bytes images = 1; #USED PIL TO PILE BYTES
+    bytes query_points = 2; // Optional — client may omit shape/data
+}
+
+message VGGTResponse {
+    bytes pose_enc = 1;
+    bytes depth = 2;
+    bytes depth_conf = 3;
+    bytes world_points = 4;
+    bytes world_points_conf = 5;
+    bytes images = 6;
+
+    // Optional if query_points was passed
+    bytes track = 7;
+    bytes vis = 8;
+    bytes conf = 9;
+}
+
