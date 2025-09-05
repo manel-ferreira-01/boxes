@@ -11,10 +11,9 @@ $ docker build --tag sipgisr/vggtgrpc --build-arg SERVICE_NAME=vggt -f docker/Do
 
 ### Data format 
 
-
-- **Input** : a mat file with a dictionary named imgdata with a list of encoded images
-- **Output** : a mat file with all data returned by vggt
-- dict_keys(['__header__', '__version__', '__globals__', 'pose_enc', 'depth', 'depth_conf', 'world_points', 'world_points_conf', 'images'])
+- **Input** : check test notebook: repeated bytes of images.
+- **Output** : a dictionary with all data returned by vggt
+- dict_keys(['pose_enc', 'depth', 'depth_conf', 'world_points', 'world_points_conf', 'images'])
 
 ### Launching the container with the service
 
