@@ -73,7 +73,7 @@ COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
 
 # Copy the service file and the utils to workspace
 # (rename service file to only service.py for generic usage)
-COPY --chown=${USER}:${GROUP} ${SRC}/vggt ${WORKSPACE}/vggt
+COPY --chown=${USER}:${GROUP} ${SRC} ${WORKSPACE}
 COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/service.py
 
 # Change to non-privileged user
@@ -83,5 +83,20 @@ USER ${USER}
 EXPOSE 8061
 
 WORKDIR ${WORKSPACE}
+
+# -----------------------------
+# Specific steps for vggt service
+# -----------------------------
+
+COPY --chown=${USER}:${GROUP} ${SRC}/vggt ${WORKSPACE}/vggt
+RUN pip install -r ${WORKSPACE}/vggt/requirements.txt
+
+# set $TORCH_HOME for torchhub cache
+ENV TORCH_HOME=${WORKSPACE}/.cache
+ENV HF_HOME=${WORKSPACE}/.cache
+ENV HF_HUB_CACHE=${WORKSPACE}/.cache
+
+#print the torchhub cache path
+RUN echo "Torch hub cache path: $TORCH_HOME"
 
 CMD ["python3", "service.py"]
