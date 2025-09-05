@@ -29,7 +29,7 @@ COPY ${PROTOS_FOLDER_DIR} ${WORKSPACE}/
 WORKDIR ${WORKSPACE}
 
 # Compile proto file and remove it
-RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${SERVICE_NAME}.proto
+RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. ${SERVICE_NAME}.proto
 
 
 # -----------------------------

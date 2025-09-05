@@ -23,11 +23,11 @@ import torch.nn.functional as F
 from importlib.machinery import SourceFileLoader
 vggt_pb2 = SourceFileLoader(
     "vggt_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/vggt_pb2.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./vggt_pb2.py")
 ).load_module()
 vggt_pb2_grpc = SourceFileLoader(
     "vggt_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/vggt_pb2_grpc.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./vggt_pb2_grpc.py")
 ).load_module()
 
 from vggt.models.vggt import VGGT
