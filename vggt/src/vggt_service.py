@@ -155,39 +155,48 @@ def tensor_to_bytes(t: torch.Tensor) -> bytes:
     torch.save(t.cpu(), buf)
     return buf.getvalue()
 
+import threading
+
+IDLE_TIMEOUT = 60  # seconds (5 min)
+
 class VGGTService(vggt_pb2_grpc.VGGTServiceServicer):
 
     def __init__(self):
-        """
-        Args:
-          Loads VGGT model 
-        """
-        
+        # Always load to CPU first
+        self._model = VGGT.from_pretrained("facebook/VGGT-1B").to("cpu")
+        self._device = "cpu"
+        logging.info("Model loaded on CPU")
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._device = device
+        self._last_request_time = time.time()
+        self._lock = threading.Lock()
 
-        # Initialize the model and load the pretrained weights.
-        # This will automatically download the model weights the first time it's run, which may take a while.
-        self._model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)     
-        logging.info(f'Model loaded on device: {device}')
+        # Background thread to monitor idle time
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.start()
 
+    def _watchdog_loop(self):
+        while True:
+            time.sleep(10)  # check every 10s
+            with self._lock:
+                idle_time = time.time() - self._last_request_time
+                if idle_time > IDLE_TIMEOUT and self._device == "cuda":
+                    logging.info("Idle timeout reached: moving model back to CPU")
+                    self._model.to("cpu")
+                    torch.cuda.empty_cache()
+                    self._device = "cpu"
 
     def Forward(self, request, context):
-        """
-        matfile is the matlab file with input data
+        with self._lock:
+            self._last_request_time = time.time()
 
-        Args:
-            request: The ImageAndFeatures request to process
-            context: Context of the gRPC call
+            # If idle watchdog moved it back to CPU, restore to GPU
+            if self._device == "cpu" and torch.cuda.is_available():
+                logging.info("Request received: moving model to GPU")
+                self._model.to("cuda")
+                self._device = "cuda"
 
-        Returns:
-            The Image with the applied function
-        features={'kp','desc'}
-        """
-        #datain = request.images
-
-        ret_file= run_codigo(request, self._model,self._device)
+        # Run inference
+        ret_file = run_codigo(request, self._model, self._device)
 
         response = vggt_pb2.VGGTResponse(
             pose_enc=tensor_to_bytes(ret_file["pose_enc"]),
@@ -197,7 +206,6 @@ class VGGTService(vggt_pb2_grpc.VGGTServiceServicer):
             world_points_conf=tensor_to_bytes(ret_file["world_points_conf"]),
         )
 
-        # If your ret_file sometimes includes these optional outputs:
         if "track" in ret_file:
             response.track = tensor_to_bytes(ret_file["track"])
         if "vis" in ret_file:
