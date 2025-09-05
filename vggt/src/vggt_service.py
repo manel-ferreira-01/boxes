@@ -157,7 +157,7 @@ def tensor_to_bytes(t: torch.Tensor) -> bytes:
 
 import threading
 
-IDLE_TIMEOUT = 60  # seconds (5 min)
+IDLE_TIMEOUT = 60  # seconds (1 min)
 
 class VGGTService(vggt_pb2_grpc.VGGTServiceServicer):
 
