@@ -5,7 +5,7 @@ rpc Forward(VGGTRequest) returns (VGGTResponse);
 }
 
 message VGGTRequest {
-    repeated bytes images = 1; #USED PIL TO PILE BYTES
+    repeated bytes images = 1;  // USED PIL TO PILE BYTES
     bytes query_points = 2; // Optional — client may omit shape/data
 }
 
