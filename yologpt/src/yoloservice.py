@@ -54,7 +54,8 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
                                    
                                 #----- Track a sequence -------
                                 elif "tracksequence" in l['aispgradio']['command']:
-                                    self.model.predictor.trackers[0].reset() 
+                                    if hasattr(self.model.predictor,"trackers"):
+                                        self.model.predictor.trackers[0].reset() 
                                     annotated_images,all_detections=TrackSequence(self.model,request.images,l['aispgradio'])
                                     print("YOLO: Foi ao tracksequence")       
                                     
@@ -72,7 +73,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
                             logging.error(f'AllProcessing error:  {e}')
                             _, labeled_image_bytes = cv2.imencode('.jpg', np.zeros((5, 5, 3), dtype='uint8'))
                             annotated_images = [labeled_image_bytes.tobytes()]
-                            all_detections = {"ErrorYolo": "TRACKING: Image not valid"}
+                            all_detections = {"ErrorYolo": f"TRACKING: {e}"}
                             
                     label.append({"YOLO": all_detections})
                     detections_json=json.dumps(label)
