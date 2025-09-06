@@ -1,18 +1,68 @@
 import gradio as gr
 import numpy as np
 import cv2
+from scipy.io import savemat, loadmat
 import os
 import time
 import logging
 import json
 import threading
 import pickle
-from utils import write_list_to_temp,force_resize_image
-from utils import getdictrowsfromjson, getrowsfromjson, getfromkey
 import tempfile
+import csv
+from collections.abc import Iterable
 
 _IMG_MAX_SIZE = 640
-   
+#------------------- UTILS -------------------    
+
+def flatten(item):
+    """Recursively flattens nested iterables except strings and bytes."""
+    if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+        for sub in item:
+            yield from flatten(sub)
+    else:
+        yield item
+
+def write_list_to_temp_csv(data_list,prefix="track_"):
+    """Writes a list to a temp CSV file, flattening each item if needed."""
+    with tempfile.NamedTemporaryFile(mode='w', newline='', delete=False, prefix=prefix,suffix='.csv') as temp_file:
+        writer = csv.writer(temp_file)
+        for element in data_list:
+            # Wrap non-iterable elements in a list so they're still written as a row
+            if isinstance(element, Iterable) and not isinstance(element, (str, bytes)):
+                flat_row = list(flatten(element))
+            else:
+                flat_row = [element]
+            writer.writerow(flat_row)
+        return temp_file.name
+
+def getfromkey(lista,key):
+    for l in lista:
+        if key in l:
+            return l[key]
+    return None
+
+def getrowsfromjson(seqdetections):
+    rows=[]
+    for i,img in enumerate(seqdetections) :
+        for obj in img:
+            if obj:
+                tmp=list(obj.values())
+                tmp.insert(0,i+1)
+                rows.append(flatten(tmp))
+    return rows
+    
+# Define a function to resize an image
+def force_resize_image(img,max_size):
+    # Resize the image so that it has a maximum dimension of 640 pixels
+    if img.shape[0]>img.shape[1]:
+        img = cv2.resize(img, (int(max_size *img.shape[1]/img.shape[0]),max_size), interpolation=cv2.INTER_LINEAR)
+    else:
+        img = cv2.resize(img, (max_size,int(max_size *img.shape[0]/img.shape[1])), interpolation=cv2.INTER_LINEAR)
+    
+    # Return the resized image as a PIL Image object
+    return img
+    
 #------------------------  Gradio DISPLAY OBJECT ---------      
 
 class GradioDisplay:
@@ -105,14 +155,12 @@ class GradioDisplay:
 
 #---Callback  Delete temporary files ---------
     
-    def _delete_results_files(self,download_data: gr.DownloadData,request:gr.Request):
+    def _delete_results_files(self,download_data: gr.DownloadData):
         file_name = os.path.basename(download_data.file.path)
-        if request.session_hash:
-            toremove=self.output_files[request.session_hash]["files"].pop(file_name,None)
-            if toremove:
-                if os.path.exists(toremove):
-                    os.remove(toremove)
-            return list(self.output_files[request.session_hash]["files"].values())
+        toremove=self.output_files.pop(file_name)
+        if os.path.exists(toremove):
+            os.remove(toremove)
+        return list(self.output_files.values())
 
 #----------- COmmands for yolo container
 #    print(f"Yolo command:  {l['aispgradio']['command']}")
@@ -121,54 +169,49 @@ class GradioDisplay:
 #    elif "tracksequence" in l['aispgradio']['command']:
  
 #----------  DETECT Update ---------------
-    def _update_sequence(self,img,label,request:gr.Request):
-        
+    def _update_sequence(self,img,label):
+        """ Process DETECTION REQUEST of a sequence
+            resize images to avoid breaking the grpc link
+        """
         if img is None:
-            return None, "No images uploaded!",None
+            return None, "ERROR Detection: No images"
         else:
             galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
-
         #if there is an input image, process and wait for the answer
         try:
             with self.lock:    
                 with open(self.input_data_file, 'wb') as f:
-                    pickle.dump({"gradio":[galeria,label],"command":"detectsequence"},f)    
+                    pickle.dump({"gradio":[galeria,label],"command":"detectsequence"},f)   
+                print("Detection : Pickle written")
+        except Exception as e:
+            logging.error(f"Error in update_sequence : {e}")
+            return None, f"Error in update_sequence : {e}"
             
 #------wait for response of the pipeline (imgs and json) -----------     
-            while True:
+        while True:
+            try:
                 if os.path.exists(self.output_data_file):# Need to lock while loading
+#                    print("-----Images do DISPLAY: TRACKING ------")
                     with self.lock:
                         with open(self.output_data_file, 'rb') as f:
                             ret_data=pickle.load(f)
                         os.remove(self.output_data_file)
-# ---desdobra json para csv
-                    annotations= json.loads(ret_data[1])                    
-                    results=getrowsfromjson(getfromkey(annotations,"YOLO"))
-                   
-                    base,filepath= write_list_to_temp(results,prefix="detect_objects__",suffix=".csv")
-                    basej,filepathj= write_list_to_temp(ret_data[1],prefix="detect_objects__",suffix=".json")
-                    newfiles={base:filepath,basej:filepathj}
-                    
-                    if request.session_hash in  self.output_files:
-                        self.output_files[request.session_hash]["files"].update(newfiles)
-                    else:
-                        self.output_files.update({request.session_hash:{"files":newfiles}})
-                        
-                    return ret_data[0],annotations,list(self.output_files[request.session_hash]["files"].values())                
+                        print(type(ret_data))
+                    return ret_data[0],json.loads(ret_data[1])
                 else:
-                    time.sleep(.5)
-        except Exception as e:
-            logging.error(f"Error in update_trackingsequence: {e}")
-            time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e}",None
+                    time.sleep(.1)
+            except Exception as e:
+                logging.error(f"UPDATE_ACQUIRE: Error during loadmat: {e}")
+                time.sleep(10)
+                return None,"Error in data"
 
     #---- TRACKING PROCESS -- TODO: collapse with detection into one single function.
     # Change form to have tracking as a tick (track/no track) in detection
 
-    def _update_trackingsequence(self,img,label,request:gr.Request):
+    def _update_trackingsequence(self,img,label):
         
         if img is None:
-            return None, "No images uploaded!",None
+            return None, "ERROR WHILE TRACKING: No images"
         else:
             galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
 
@@ -186,25 +229,19 @@ class GradioDisplay:
                             ret_data=pickle.load(f)
                         os.remove(self.output_data_file)
 # ---desdobra json para csv
-                    annotations= json.loads(ret_data[1])                    
+                    annotations= json.loads(ret_data[1])
                     results=getrowsfromjson(getfromkey(annotations,"YOLO"))
-                   
-                    base,filepath= write_list_to_temp(results,prefix="object_track__",suffix=".csv")
-                    basej,filepathj= write_list_to_temp(ret_data[1],prefix="object_track__",suffix=".json")
-                    newfiles={base:filepath,basej:filepathj}
                     
-                    if request.session_hash in  self.output_files:
-                        self.output_files[request.session_hash]["files"].update(newfiles)
-                    else:
-                        self.output_files.update({request.session_hash:{"files":newfiles}})
-                        
-                    return ret_data[0],annotations,list(self.output_files[request.session_hash]["files"].values())                
+                    file= write_list_to_temp_csv(results)
+                    key=os.path.basename(file)
+                    self.output_files.update({key:file})
+                    return ret_data[0],annotations,list(self.output_files.values())                
                 else:
                     time.sleep(.5)
         except Exception as e:
             logging.error(f"Error in update_trackingsequence: {e}")
             time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e}",None
+            return None, f"Error in update_trackingsequence : {e}"
         
     def _update_acquire(self,img,label):
     #if user input an image and clicked on button, store data to be sent by grpc
