@@ -35,6 +35,8 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
             for l in label:
                 if type(l) is dict:
                     if "aispgradio" in l.keys():
+                        comm=l['aispgradio'].keys()
+                        logging.info(f"YOLO AllProcessing: {comm}")
                         try:
                             #------- Empty Packet , Do nothing ---------
                             if "empty" in l['aispgradio'].keys():
@@ -52,6 +54,7 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
                                    
                                 #----- Track a sequence -------
                                 elif "tracksequence" in l['aispgradio']['command']:
+                                    self.model.predictor.trackers[0].reset() 
                                     annotated_images,all_detections=TrackSequence(self.model,request.images,l['aispgradio'])
                                     print("YOLO: Foi ao tracksequence")       
                                     

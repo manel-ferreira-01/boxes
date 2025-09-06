@@ -1,6 +1,6 @@
 **/.DS_Store
 **/.pynb_checkpoints
-**/.__pycache__
+**/._*
 **/.devcontainer
 **/*.pt
 **/*.pyc

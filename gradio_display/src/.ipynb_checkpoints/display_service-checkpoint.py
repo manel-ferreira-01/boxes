@@ -14,9 +14,9 @@ import datetime
 import os
 import time
 import threading
+import pickle
 
 lock = threading.Lock()
-
 # --- Configuration ---
 
 _PORT_DEFAULT = 8061
@@ -31,42 +31,79 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         # Read in.mat if exists and returns grpc message
         if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
             try:
-#                print("ACQUIRE: Vai fazer o lock")
                 with lock:
-                    aux=loadmat(self.gradio_display.input_data_file)
+                    with open(self.gradio_display.input_data_file, 'rb') as f:
+                        gradio_data=pickle.load(f)  
                     os.remove(self.gradio_display.input_data_file)
-#                print("ACQUIRE: saiu lock")
-                _, image_bytes = cv2.imencode('.jpg', aux["img"])
-              #Add annotations: counting, datetime
+                # generate a list with one single image
+                if gradio_data["command"]=="single":
+                    img=gradio_data['gradio'][0][0];
+                    image_bytes=[cv2.imencode('.jpg', img)[1].tobytes() ]
+                     #-----generate a list of encoded images from a gallery
+                elif gradio_data["command"]=="detectsequence" or gradio_data["command"]=="tracksequence":
+                    gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
+                    image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+                else: # Update for the case of now labels
+                    logging.error(f"No command in the json string")
+                    
+
+                #--- Add annotations + counting, datetime
                 self.input_count=self.input_count+1
-                annotations={"user":np.array2string(aux["label"]),"input_count":self.input_count,
-                             "timestamp":datetime.datetime.now().isoformat()}
-                label= json.dumps({"aispgradio":annotations})
-                return display_pb2.AcquireResponse(label=label, image=image_bytes.tobytes())
+                annotations={ "command":gradio_data["command"], 
+                              "user":gradio_data["gradio"][1],
+                              "input_count":self.input_count,
+                              "timestamp":datetime.datetime.now().isoformat(),
+                              "yoloconfig":"vai aqui a configuraçao"#isto não é aqui ... 
+                            }
             except Exception as e:
                 logging.error(f"Error in acquire: {e}")
                 time.sleep(0.1)
                 annotations={"erroracquire":f"Error in acquire: {e}"}
         else:
             time.sleep(2)
-            annotations= {"empty":""}
-            
+            annotations= {"empty":"empty"}
+            _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8')) #zero image just in case
+            image_bytes= [tmp.tobytes()]
 
-        label= json.dumps({"aispgradio":annotations})  
-        _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8'))
-        return display_pb2.AcquireResponse(label=label, image=tmp.tobytes())
+        label= json.dumps([{"aispgradio":annotations}])
+        images = image_bytes
+#        logging.info("DISPLAY : Sending data ")
+
+        return display_pb2.AcquireResponse(label=label, image= images )
 
 
     def display(self, request, context):
-        label=json.loads(request.label)
+        label=json.loads(request.label) 
+#        print(label)
+        try:#--- parse the label info
+            for l in label:
+#                print("--LABEL---")
+#                print(l)
+                if type(l) is dict:
+                    if "aispgradio" in l:
+                        if "empty" in l['aispgradio']:
+                            return display_pb2.DisplayResponse()
+                        elif "single" in l["aispgradio"]["command"]:
+#                            print("--chegou imagem single---")
+                            self.gradio_display.update(request.image[0], request.label)
+                        elif "detectsequence" in l["aispgradio"]["command"] :
+                            image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
+                            with lock:
+                                with open(self.gradio_display.output_data_file, 'wb') as f:
+                                    pickle.dump([image_np,request.label],f)
+                        elif "tracksequence" in l["aispgradio"]["command"] :
+                            image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
+                            with lock:
+                                with open(self.gradio_display.output_data_file, 'wb') as f:
+                                    pickle.dump([image_np,request.label],f)
+                        else:
+                            tmp=l["aispgradio"]
+                            logging.error(f"Tem AISPGRADIO MAS NAO APANHOU KEYWORD NENHUMA {tmp}")
         
-        for l in label:
-            if type(l) is dict:
-                if "aispgradio" in l.keys():
-                    if "empty" in l['aispgradio']:
-                        return display_pb2.DisplayResponse()
-        
-        self.gradio_display.update(request.image, request.label)   
+        except Exception as e:
+            logging.error(f"ERRO NO DISPLAY: {e}")
+           
+        print("------------End Display -------------------------")    
         return display_pb2.DisplayResponse()
 
 # --- gRPC Server Launchers ---

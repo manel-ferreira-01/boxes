@@ -5,7 +5,7 @@ import warnings
 
 import display_pb2 as display__pb2
 
-GRPC_GENERATED_VERSION = '1.74.0'
+GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -26,7 +26,9 @@ if _version_not_supported:
 
 
 class DisplayServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
+
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -47,7 +49,9 @@ class DisplayServiceStub(object):
 
 
 class DisplayServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
+
+    """
 
     def display(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -83,7 +87,9 @@ def add_DisplayServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class DisplayService(object):
-    """Missing associated documentation comment in .proto file."""
+    """python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
+
+    """
 
     @staticmethod
     def display(request,

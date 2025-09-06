@@ -56,6 +56,9 @@ RUN addgroup --system ${GROUP} && \
 COPY requirements.txt .
 
 RUN pip install --upgrade pip && \
+    # Install headless version of opencv-python for server usage
+    # Does not install graphical modules
+    # See https://github.com/opencv/opencv-python#installation-and-usage
     pip install -r requirements.txt && \
     rm requirements.txt
 
@@ -80,4 +83,4 @@ EXPOSE 7860
 
 WORKDIR ${WORKSPACE}
 
-CMD ["python", "service.py"]
+CMD ["sleep", "36000"]

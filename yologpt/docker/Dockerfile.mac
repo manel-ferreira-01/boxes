@@ -31,8 +31,8 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${PROTO_F
 # ------------------------------
 # Final image to run the service
 # ------------------------------
-FROM ultralytics/ultralytics:latest
-#FROM python:3.10-slim 
+#FROM ultralytics/ultralytics:latest
+FROM python:3.10-slim 
 # Renew build args
 ARG USER
 ARG GROUP
@@ -54,7 +54,7 @@ RUN addgroup --system ${GROUP} && \
 RUN apt update && apt install -y   libgl1-mesa-glx libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
-    pip install grpcio grpcio-reflection  lap
+    pip install grpcio grpcio-reflection ultralytics opencv-python-headless lap
 #    pip install grpcio==1.35.0 grpcio-reflection==1.35.0 ultralytics opencv-python
 
 # COPY .proto file to root to meet ai4eu specifications

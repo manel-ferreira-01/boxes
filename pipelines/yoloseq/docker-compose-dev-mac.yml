@@ -1,15 +1,17 @@
 services:
   interface:
-    image: sipgisr/jupyterdev
+#    image: sipgisr/jupyterdev
+    image: sipgisr/gradio_display_multiple:mac
     ports:
     - 7860:7860
     - 8889:8888
     volumes:
       - type: bind
         source: ../../../
-        target: /home/jovyan/work/workspace
+        target: /home/jovyan/workspace
   yologpt:
-    image: sipgisr/yolov11:dev-mac
+#    image: sipgisr/yolov11:dev-mac
+    image: sipgisr/yolov11:mac
     volumes:
       - type: bind
         source:  ../../yologpt
