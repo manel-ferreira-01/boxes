@@ -1,10 +1,10 @@
 services:
   interface:
-    image: sipgisr/gradio_display_multiple:mac
+    image: sipgisr/gradio_display_multiple
     ports:
     - 7860:7860
   yologpt:
-    image: sipgisr/yolov11:mac
+    image: sipgisr/yolov11
     ports:
     - 8062:8061
   maestro:

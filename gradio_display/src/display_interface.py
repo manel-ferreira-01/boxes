@@ -186,9 +186,12 @@ class GradioDisplay:
                             ret_data=pickle.load(f)
                         os.remove(self.output_data_file)
 # ---desdobra json para csv
-                    annotations= json.loads(ret_data[1])                    
-                    results=getrowsfromjson(getfromkey(annotations,"YOLO"))
-                   
+                    
+                    annotations= json.loads(ret_data[1])
+                    yoloannotations=getfromkey(annotations,"YOLO")
+                    if "ErrorYolo"  in yoloannotations:
+                        raise Exception(f"{yoloannotations}")
+                    results=getrowsfromjson(yoloannotations)
                     base,filepath= write_list_to_temp(results,prefix="object_track__",suffix=".csv")
                     basej,filepathj= write_list_to_temp(ret_data[1],prefix="object_track__",suffix=".json")
                     newfiles={base:filepath,basej:filepathj}
@@ -204,7 +207,7 @@ class GradioDisplay:
         except Exception as e:
             logging.error(f"Error in update_trackingsequence: {e}")
             time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e}",None
+            return None, f"Error in update_trackingsequence : {e} - annotations {annotations}",None
         
     def _update_acquire(self,img,label):
     #if user input an image and clicked on button, store data to be sent by grpc
