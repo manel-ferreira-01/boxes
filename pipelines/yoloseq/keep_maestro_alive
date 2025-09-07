@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Check if container name is provided
+if [ -z "$1" ]; then
+  echo "Usage: $0 <container_name>"
+    exit 1
+    fi
+
+CONTAINER="$1"
+
+# Infinite loop
+while true; do
+  # Get logs
+    LOGS=$(docker logs "$CONTAINER" 2>&1)
+
+  # Search for the word "finished"
+    if echo "$LOGS" | grep -q "finished"; then
+        echo "$(date): 'finished' found in logs. Restarting container $CONTAINER..."
+	    docker restart "$CONTAINER"
+	      else
+	          echo "$(date): No 'finished' found in logs."
+		    fi
+
+  # Sleep 30 seconds
+    sleep 30
+    done
+    

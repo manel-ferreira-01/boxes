@@ -47,13 +47,24 @@ class GradioDisplay:
         with gr.Blocks(delete_cache=(300,600),title="SIPg Toolbox") as demo:
             gr.Markdown("""![Deu asneira](https://drive.sipg.tecnico.ulisboa.pt/s/zkiEPD7qzCgyWkK/preview)       
 
-            ### This website is under active development it may change at any time. For now, the main tasks available:
-
-            - Detection of objects (YOLO) 
-            - Tracking objects in image sequences/videos
-            - 3D reconstruction with VGGT
+            ### This website contains major services provided by SIPg to its members and to the community. 
             
-            Support by many institutions, including relevant [defunct institutions](http://www.fct.pt), and ![Image not loaded](https://drive.sipg.tecnico.ulisboa.pt/s/WdaAsmyYT8B3QWw/preview)""")
+            ## Services to members:
+            
+            - [Online drawing (excalibur)](http://draw.sipg.tecnico.ulisboa.pt)
+            - [PDF manipulation](http://pdf.sipg.tecnico.ulisboa.pt)
+            - [Storage on a private cloud](http://drive.sipg.tecnico.ulisboa.pt)
+            - [Immich Photo](http://gphotos.sipg.tecnico.ulisboa.pt)
+
+            ## Algorithms online
+            
+            - Detection of objects (YOLO) 
+            - Tracking objects in image sequences/videos (YOLO)
+            - 3D reconstruction with VGGT
+            - [Large Scale Camera Calibration](https://github.com/sipg-isr/vican)
+            - TBDeployed soon : distributed optim, sparse clustering ... 
+            
+            This website was developped with support from project Smart Retail , including relevant [defunct institutions](http://www.fct.pt), and ![Image not loaded](https://drive.sipg.tecnico.ulisboa.pt/s/WdaAsmyYT8B3QWw/preview)""")
 
 #---------------- TAB  Main TAB-----------------
             with gr.Tab("Main Menu"):
@@ -74,7 +85,7 @@ class GradioDisplay:
                 )
 #---------------- TAB Gallery para sequencias -----------------
 
-            with gr.Tab("Yolo Image Sequence"):
+            with gr.Tab("Detection/Tracking for Image Sequences"):
                 with gr.Row():
                     with gr.Column():
                         self.image_input_gallery = gr.Gallery(label="Input Images",type="numpy",interactive=True)
@@ -186,9 +197,12 @@ class GradioDisplay:
                             ret_data=pickle.load(f)
                         os.remove(self.output_data_file)
 # ---desdobra json para csv
-                    annotations= json.loads(ret_data[1])                    
-                    results=getrowsfromjson(getfromkey(annotations,"YOLO"))
-                   
+                    
+                    annotations= json.loads(ret_data[1])
+                    yoloannotations=getfromkey(annotations,"YOLO")
+                    if "ErrorYolo"  in yoloannotations:
+                        raise Exception(f"{yoloannotations}")
+                    results=getrowsfromjson(yoloannotations)
                     base,filepath= write_list_to_temp(results,prefix="object_track__",suffix=".csv")
                     basej,filepathj= write_list_to_temp(ret_data[1],prefix="object_track__",suffix=".json")
                     newfiles={base:filepath,basej:filepathj}
@@ -204,7 +218,7 @@ class GradioDisplay:
         except Exception as e:
             logging.error(f"Error in update_trackingsequence: {e}")
             time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e}",None
+            return None, f"Error in update_trackingsequence : {e} - annotations {annotations}",None
         
     def _update_acquire(self,img,label):
     #if user input an image and clicked on button, store data to be sent by grpc
