@@ -58,3 +58,9 @@ bash buildme
 
 * **Running the service in a pipeline:** Follow the configuration and deployment rules of ```maestro``` the pipeline orchestrator [maestro@github](https://github.com/jpcosteira/maestro)
 
+
+## Generate gRPC Python files from `X.proto`:
+
+```bash
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. X.proto
+```

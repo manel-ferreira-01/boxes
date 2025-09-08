@@ -7,7 +7,6 @@ ARG WORKSPACE=/workspace
 # The python file should have the name ${SERVICE_NAME}_service.py
 ARG SERVICE_NAME=image_generic
 
-
 # --------------------------------------
 # Builder stage to generate .proto files
 # --------------------------------------
@@ -30,7 +29,6 @@ WORKDIR ${WORKSPACE}
 
 # Compile proto file and remove it
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${SERVICE_NAME}.proto
-
 
 # -----------------------------
 # Stage to generate final image

@@ -1,0 +1,5 @@
+image-source:8061
+open-pose:8061
+open-cv:8061
+tag-my-outfit:8061
+visualization:8061
