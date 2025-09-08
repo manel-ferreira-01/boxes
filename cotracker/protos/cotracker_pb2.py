@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x63otracker.proto\"`\n\x10\x43oTrackerRequest\x12\r\n\x05video\x18\x01 \x01(\x0c\x12\x14\n\x0cvideo_tensor\x18\x02 \x01(\x0c\x12\x14\n\x0cquery_points\x18\x03 \x01(\x0c\x12\x11\n\tgrid_size\x18\x04 \x01(\x05\"#\n\x11\x43oTrackerResponse\x12\x0e\n\x06tracks\x18\x01 \x01(\x0c\x32\x44\n\x10\x43oTrackerService\x12\x30\n\x07\x46orward\x12\x11.CoTrackerRequest\x1a\x12.CoTrackerResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x63otracker.proto\"`\n\x10\x43oTrackerRequest\x12\r\n\x05video\x18\x01 \x01(\x0c\x12\x14\n\x0cvideo_tensor\x18\x02 \x01(\x0c\x12\x14\n\x0cquery_points\x18\x03 \x01(\x0c\x12\x11\n\tgrid_size\x18\x04 \x01(\x05\"7\n\x11\x43oTrackerResponse\x12\x0e\n\x06tracks\x18\x01 \x01(\x0c\x12\x12\n\nvisibility\x18\x02 \x01(\x0c\x32\x44\n\x10\x43oTrackerService\x12\x30\n\x07\x46orward\x12\x11.CoTrackerRequest\x1a\x12.CoTrackerResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,7 +34,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_COTRACKERREQUEST']._serialized_start=19
   _globals['_COTRACKERREQUEST']._serialized_end=115
   _globals['_COTRACKERRESPONSE']._serialized_start=117
-  _globals['_COTRACKERRESPONSE']._serialized_end=152
-  _globals['_COTRACKERSERVICE']._serialized_start=154
-  _globals['_COTRACKERSERVICE']._serialized_end=222
+  _globals['_COTRACKERRESPONSE']._serialized_end=172
+  _globals['_COTRACKERSERVICE']._serialized_start=174
+  _globals['_COTRACKERSERVICE']._serialized_end=242
 # @@protoc_insertion_point(module_scope)
