@@ -11,3 +11,4 @@ huggingface_hub
 einops
 safetensors
 torchcodec
+decord
