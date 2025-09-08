@@ -21,11 +21,11 @@ import decord
 from importlib.machinery import SourceFileLoader
 cotracker_pb2 = SourceFileLoader(
     "cotracker_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/cotracker_pb2.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./cotracker_pb2.py")
 ).load_module()
 cotracker_pb2_grpc = SourceFileLoader(
     "cotracker_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/cotracker_pb2_grpc.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./cotracker_pb2_grpc.py")
 ).load_module()
 
 

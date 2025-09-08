@@ -88,8 +88,8 @@ WORKDIR ${WORKSPACE}
 # Specific steps for vggt service
 # -----------------------------
 
-COPY --chown=${USER}:${GROUP} ${SRC}/vggt ${WORKSPACE}/vggt
-RUN pip install -r ${WORKSPACE}/vggt/requirements.txt
+#COPY --chown=${USER}:${GROUP} ${SRC}/vggt ${WORKSPACE}/vggt
+#RUN pip install -r ${WORKSPACE}/vggt/requirements.txt
 
 # set $TORCH_HOME for torchhub cache
 ENV TORCH_HOME=${WORKSPACE}/.cache
