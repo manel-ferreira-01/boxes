@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+service CoTrackerService {
+    rpc Forward(CoTrackerRequest) returns (CoTrackerResponse);
+}
+
+message CoTrackerRequest {
+    bytes video = 1;  // USED PIL TO PILE BYTES IN RGB
+    bytes video_tensor = 2;
+    bytes query_points = 3; // query_points with frame_num
+    int32 grid_size = 4;  // if points is none, then grid_size will be used
+}
+
+message CoTrackerResponse {
+    bytes tracks = 1; // tensor
+    bytes visibility = 2;
+}
+

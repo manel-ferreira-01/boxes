@@ -34,7 +34,7 @@ _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 import threading
-IDLE_TIMEOUT = 60  # seconds (1 min)
+IDLE_TIMEOUT = 10  # seconds (1 min)
 
 def tensor_to_bytes(t: torch.Tensor) -> bytes:
     buf = io.BytesIO()
@@ -78,10 +78,11 @@ class CoTrackerService(cotracker_pb2_grpc.CoTrackerServiceServicer):
                 self._device = "cuda"
 
         # Run inference
-        tracks_tensor = run_codigo(request, self._model, self._device)
+        tracks, visibility = run_codigo(request, self._model, self._device)
 
         response = cotracker_pb2.CoTrackerResponse(
-            tracks = tensor_to_bytes(tracks_tensor),
+            tracks = tensor_to_bytes(tracks),
+            visibility = tensor_to_bytes(visibility)
         )
 
         return response
@@ -93,12 +94,12 @@ def run_codigo(request,model,device):
     # Check whether a tensor or a video arrived
     if request.video:
         # Write to temp file so decord can open it
-        with tempfile.NamedTemporaryFile(suffix=os.path.splitext("temp.mp4")[1] or ".mp4") as tmp:
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext("temp.mp4")[1] or ".mp4") as tmp: # file extension does not matter
             tmp.write(request.video)
             tmp.flush()
 
             # Create VideoReader
-            vr = decord.VideoReader(tmp.name)
+            vr = decord.VideoReader(tmp.name) # TODO: NEW TORCH VERSION USE TORCHCODEC
             frames = vr.get_batch(range(len(vr))).asnumpy()  # (num_frames, H, W, 3)
 
             # Go to BTCHW
@@ -113,6 +114,11 @@ def run_codigo(request,model,device):
                 pred_tracks, pred_visibility = model(frames, query_points=query_points)
             else:
                 raise ValueError("Either query_points or grid_size must be provided")
+            
+    # send tensors back to cpu
+    pred_tracks = pred_tracks.to("cpu")
+    pred_visibility = pred_visibility.to("cpu")
+    frames = frames.to("cpu")
     
     # pred_tracks.shape = (1, num_points, num_frames, 2)
     return pred_tracks, pred_visibility
