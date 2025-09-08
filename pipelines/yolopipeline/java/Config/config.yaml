@@ -1,0 +1,22 @@
+stages:
+  -  name: Yolodetect
+     host: yologpt
+     port: 8061
+     method: Detect
+  -  name: gradio-source
+     host: interface
+     port: 8061
+     method: acquire
+  -  name: gradio-display
+     host: interface
+     port: 8061
+     method: display
+links:
+  -  source:
+       stage: "gradio-source"
+     target:
+       stage: "Yolodetect"
+  -  source:
+       stage: "Yolodetect"
+     target:
+       stage: "gradio-display"

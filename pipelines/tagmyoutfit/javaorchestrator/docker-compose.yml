@@ -1,0 +1,39 @@
+version: '3'
+services:
+  # By default the gRPC servers are listening at port 8061,
+  # according to AI4EU specifications.
+  # We can distinguish servers by host, defined by the service name
+  # See https://docs.docker.com/compose/networking/
+  image-source:
+    image: sipgisr/image-source:latest
+    volumes:
+    - type: bind
+      source: ./images/
+      target: /workspace/images/
+  open-pose:
+    image: sipgisr/open-pose-grpc:kp-estimation-latest
+  open-cv:
+    image: sipgisr/opencv-grpc:poses-latest
+    volumes:
+    - type: bind
+      source: ./Crop/src/crop_function.py
+      # Copy to external.py to use external as module name
+      # which is the default
+      target: /workspace/external.py
+  tag-my-outfit:
+    image: sipgisr/tag-my-outfit:latest
+  visualization:
+    image: sipgisr/visualization:latest
+    # Only port visible outside the docker environment
+    # to see the images in the web
+    ports:
+    - "8062:8062"
+  orchestrator-node:
+    image: sipgisr/grpc-orchestrator:latest
+    volumes: 
+    - type: bind
+      source: ./Config
+      target: /app/config
+    environment:
+      CONFIG_FILE: "config/config.yaml"
+    command: bash -c "/usr/bin/wait-for-all.sh config/urls.txt && java -cp '*' pipeline.orchestrator.App"
