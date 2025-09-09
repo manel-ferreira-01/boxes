@@ -92,7 +92,7 @@ class CoTrackerService(cotracker_pb2_grpc.CoTrackerServiceServicer):
 def run_codigo(request,model,device):
     
     # Check whether a tensor or a video arrived
-    if request.video:
+    if request.video and not request.video_tensor:
         # Write to temp file so decord can open it
         with tempfile.NamedTemporaryFile(suffix=os.path.splitext("temp.mp4")[1] or ".mp4") as tmp: # file extension does not matter
             tmp.write(request.video)
@@ -114,6 +114,20 @@ def run_codigo(request,model,device):
                 pred_tracks, pred_visibility = model(frames, query_points=query_points)
             else:
                 raise ValueError("Either query_points or grid_size must be provided")
+            
+    elif request.video_tensor:
+        # Use the provided tensor
+        frames = torch.load(io.BytesIO(request.video_tensor)).to(device)
+
+        if not request.query_points:
+            # use grid_size
+            pred_tracks, pred_visibility = model(frames, grid_size=request.grid_size)
+        elif request.query_points:
+            # use query_points
+            query_points = torch.load(io.BytesIO(request.query_points))
+            pred_tracks, pred_visibility = model(frames, query_points=query_points)
+        else:
+            raise ValueError("Either query_points or grid_size must be provided")
             
     # send tensors back to cpu
     pred_tracks = pred_tracks.to("cpu")
