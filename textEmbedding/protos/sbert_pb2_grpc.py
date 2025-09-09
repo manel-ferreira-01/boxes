@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import simplebox_pb2 as simplebox__pb2
+import sbert_pb2 as sbert__pb2
 
-GRPC_GENERATED_VERSION = '1.70.0'
+GRPC_GENERATED_VERSION = '1.73.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,20 +18,15 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in simplebox_pb2_grpc.py depends on'
+        + f' but the generated code in sbert_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class SimpleBoxServiceStub(object):
-    """
-    Service that receives an image, applies some
-    transformation to it and returns the new image
-    :param Image: The image to process
-    :returns: The transformed image
-    """
+class SBERTServiceStub(object):
+    """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
         """Constructor.
@@ -39,53 +34,43 @@ class SimpleBoxServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.process = channel.unary_unary(
-                '/SimpleBoxService/process',
-                request_serializer=simplebox__pb2.matfile.SerializeToString,
-                response_deserializer=simplebox__pb2.matfile.FromString,
+        self.Forward = channel.unary_unary(
+                '/SBERTService/Forward',
+                request_serializer=sbert__pb2.SBERTRequest.SerializeToString,
+                response_deserializer=sbert__pb2.SBERTResponse.FromString,
                 _registered_method=True)
 
 
-class SimpleBoxServiceServicer(object):
-    """
-    Service that receives an image, applies some
-    transformation to it and returns the new image
-    :param Image: The image to process
-    :returns: The transformed image
-    """
+class SBERTServiceServicer(object):
+    """Missing associated documentation comment in .proto file."""
 
-    def process(self, request, context):
+    def Forward(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_SimpleBoxServiceServicer_to_server(servicer, server):
+def add_SBERTServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'process': grpc.unary_unary_rpc_method_handler(
-                    servicer.process,
-                    request_deserializer=simplebox__pb2.matfile.FromString,
-                    response_serializer=simplebox__pb2.matfile.SerializeToString,
+            'Forward': grpc.unary_unary_rpc_method_handler(
+                    servicer.Forward,
+                    request_deserializer=sbert__pb2.SBERTRequest.FromString,
+                    response_serializer=sbert__pb2.SBERTResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'SimpleBoxService', rpc_method_handlers)
+            'SBERTService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('SimpleBoxService', rpc_method_handlers)
+    server.add_registered_method_handlers('SBERTService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class SimpleBoxService(object):
-    """
-    Service that receives an image, applies some
-    transformation to it and returns the new image
-    :param Image: The image to process
-    :returns: The transformed image
-    """
+class SBERTService(object):
+    """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def process(request,
+    def Forward(request,
             target,
             options=(),
             channel_credentials=None,
@@ -98,9 +83,9 @@ class SimpleBoxService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/SimpleBoxService/process',
-            simplebox__pb2.matfile.SerializeToString,
-            simplebox__pb2.matfile.FromString,
+            '/SBERTService/Forward',
+            sbert__pb2.SBERTRequest.SerializeToString,
+            sbert__pb2.SBERTResponse.FromString,
             options,
             channel_credentials,
             insecure,

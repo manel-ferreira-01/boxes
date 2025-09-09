@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+service SBERTService {
+    rpc Forward(SBERTRequest) returns (SBERTResponse);
+}
+
+// ADD MORE SERVICES FOR DIFERENTS MODELS AND DIFFERENT TASKS ? 
+
+message SBERTRequest {
+    repeated string sentences = 1;  // list of strings
+}
+
+message SBERTResponse {
+    bytes embeddings = 1; 
+    bytes similarities = 2;
+}
+
