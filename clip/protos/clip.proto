@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+service CLIPService {
+  rpc Forward(CLIPRequest) returns (CLIPResponse);
+}
+
+message CLIPRequest {
+  repeated bytes images = 1;  // JPEG/PNG encoded images
+  repeated string texts = 2;  // Text inputs
+}
+
+message CLIPResponse {
+  bytes image_emb = 1;   // shape: [num_images, D]
+  bytes text_emb = 2;    // shape: [num_texts, D]
+  bytes similarity = 3;  // shape: [num_images, num_texts]
+}

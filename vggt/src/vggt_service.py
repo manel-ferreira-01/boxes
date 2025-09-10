@@ -257,12 +257,6 @@ def run_codigo(datafile,model,device):
     return {k: v.cpu() for k, v in predictions.items()}
 
 
-    # SPECIFIC CODE ENDS HERE
-
-    f=io.BytesIO()
-    # WRITE RETURNING DATA the predictions dictionary
-    savemat(f,p)
-    return f.getvalue()
 
 def get_port():
     """
