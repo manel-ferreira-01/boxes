@@ -45,7 +45,7 @@ class GradioDisplay:
     def _create_interface(self):
 
         with gr.Blocks(delete_cache=(300,600),title="SIPg Toolbox") as demo:
-            gr.Markdown("""![Deu asneira](https://drive.sipg.tecnico.ulisboa.pt/s/zkiEPD7qzCgyWkK/preview)       
+            gr.Markdown("""![Deu asneira](https://drive.sipg.tecnico.ulisboa.pt/s/nrGaqCjrTbQTPY4/preview)       
 
             ### This website contains major services provided by SIPg to its members and to the community. 
             
