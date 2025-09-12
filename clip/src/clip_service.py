@@ -76,7 +76,13 @@ class CLIPService(clip_pb2_grpc.CLIPServiceServicer):
                 self._device = "cuda"
 
         # Run inference
-        response = run_codigo(request, self._model, self._device, self._preprocess)
+        image_features, text_features, logits_per_image = run_codigo(request, self._model, self._device, self._preprocess)
+
+        response = clip_pb2.CLIPResponse(
+            image_emb=tensor_to_bytes(image_features),
+            text_emb=tensor_to_bytes(text_features),
+            similarity=tensor_to_bytes(torch.tensor(logits_per_image))
+        )
 
         return response
 
@@ -90,8 +96,8 @@ def run_codigo(request,model,device, preprocess):
         img = Image.open(image_stream).convert("RGB")
         received_images.append(img)
 
-    image = preprocess(received_images).unsqueeze(0).to(device)
-    text = clip.tokenize(["a diagram", "a dog", "a cat"]).to(device)
+    image = preprocess(received_images[0]).unsqueeze(0).to(device)
+    text = clip.tokenize(request.texts).to(device)
 
     with torch.no_grad():
         image_features = model.encode_image(image)
@@ -100,9 +106,7 @@ def run_codigo(request,model,device, preprocess):
         logits_per_image, logits_per_text = model(image, text)
         probs = logits_per_image.softmax(dim=-1).cpu().numpy()
 
-
-
-    return image_features, text_features, 
+    return image_features, text_features, logits_per_image
 
     
 
