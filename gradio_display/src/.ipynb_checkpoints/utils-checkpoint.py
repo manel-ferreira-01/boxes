@@ -114,35 +114,4 @@ def force_resize_image(img,max_size):
     
     # Return the resized image as a PIL Image object
     return img
-
-
-def extract_frames_resize_video(video_path: str, max_size):
-    """
-    Extract frames from a video file as an iterator.
-    Each frame is resized so that the maximum dimension is 640 pixels.
-    
-    :param video_path: Path to the video file
-    :yield: Resized video frames as numpy arrays
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise IOError(f"Cannot open video: {video_path}")
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break  # End of video
-        # Get original dimensions
-        h, w = frame.shape[:2]
-
-        # Determine scaling factor
-        scale = max_size / max(h, w)
-        if scale < 1:  # Only scale down
-            new_w, new_h = int(w * scale), int(h * scale)
-            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-        yield frame
-
-    cap.release()
-
  
