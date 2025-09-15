@@ -54,9 +54,10 @@ RUN addgroup --system ${GROUP} && \
     chown -R ${USER}:${GROUP} ${WORKSPACE}
 
 # Install requirements
+#install git
 COPY requirements.txt .
 RUN apt update -y && \
-    apt install -y pip &&\
+    apt install -y pip git &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade pip && \
     # Install headless version of opencv-python for server usage
