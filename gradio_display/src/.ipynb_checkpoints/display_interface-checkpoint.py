@@ -138,7 +138,8 @@ class GradioDisplay:
             if img is None:
                 return None, "No images uploaded!",None
             if isinstance(img[0][0], str) :
-                galeria=[[[x,caption] for x in extract_frames_resize_video(video,_IMG_MAX_SIZE)] for (video,caption) in img]
+                video=img[0][0]
+                galeria=[[x,None] for x in extract_frames_resize_video(video,_IMG_MAX_SIZE) ]
             else:
                 galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
         except Exception as e:
@@ -176,9 +177,9 @@ class GradioDisplay:
                 else:
                     time.sleep(.5)
         except Exception as e:
-            logging.error(f"Error in update_trackingsequence: {e}")
+            logging.error(f"Error in detect update_sequence: {e}")
             time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e}",None
+            return None, f"Error in detect update_sequence : {e}",None
 
     #---- TRACKING PROCESS -- TODO: collapse with detection into one single function.
     # Change form to have tracking as a tick (track/no track) in detection
