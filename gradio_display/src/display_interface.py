@@ -45,30 +45,30 @@ class GradioDisplay:
     def _create_interface(self):
 
         with gr.Blocks(delete_cache=(300,600),title="SIPg Toolbox") as demo:
-            gr.Markdown("""![Deu asneira](https://drive.sipg.tecnico.ulisboa.pt/s/zkiEPD7qzCgyWkK/preview)       
-
-            ### This website contains major services provided by SIPg to its members and to the community. 
-            
-            ## Services to members:
-            
-            - [Online drawing (excalibur)](http://draw.sipg.tecnico.ulisboa.pt)
-            - [PDF manipulation](http://pdf.sipg.tecnico.ulisboa.pt)
-            - [Storage on a private cloud](http://drive.sipg.tecnico.ulisboa.pt)
-            - [Immich Photo](http://gphotos.sipg.tecnico.ulisboa.pt)
-
-            ## Algorithms online
-            
-            - Detection of objects (YOLO) 
-            - Tracking objects in image sequences/videos (YOLO)
-            - 3D reconstruction with VGGT
-            - [Large Scale Camera Calibration](https://github.com/sipg-isr/vican)
-            - TBDeployed soon : distributed optim, sparse clustering ... 
-            
-            This website was developped with support from project Smart Retail , including relevant [defunct institutions](http://www.fct.pt), and ![Image not loaded](https://drive.sipg.tecnico.ulisboa.pt/s/WdaAsmyYT8B3QWw/preview)""")
+            gr.Markdown("""![Deu asneira](https://drive.sipg.tecnico.ulisboa.pt/s/nrGaqCjrTbQTPY4/preview)""")
 
 #---------------- TAB  Main TAB-----------------
-            with gr.Tab("Main Menu"):
-                gr.Markdown("""## Upload a file, capture from your webcam or paste from clipboard""")
+            with gr.Tab("About "):
+
+                gr.Markdown("""### This website provides computational services (algorithms) for signal processing tasks, some of them  known as “Artificial Intelligence” . 
+                It’s purpose is mostly for demonstration and benchmark. 
+
+                Underneath this interface all systems are processing pipelines built and run following AI4Europe standards, the [European platform for AI-on-demand](http://ai4europe.eu).
+                
+               | Services to members|  Algorithms | 
+               |--------------|------------------------|               
+               | [Online drawing (excalibur)](http://draw.sipg.tecnico.ulisboa.pt) |  Detection of objects (YOLO) |
+               | [PDF manipulation](http://pdf.sipg.tecnico.ulisboa.pt) | Tracking objects in image sequences/videos (YOLO)|
+               | [Storage on a private cloud](http://drive.sipg.tecnico.ulisboa.pt) | 3D reconstruction |
+               |[Immich Photo](http://gphotos.sipg.tecnico.ulisboa.pt) | [Large Scale Camera Calibration](https://github.com/sipg-isr/vican) |
+               |   | TBDeployed soon : distributed optim, sparse clustering ...  |
+               
+               This website was developped with support from project Smart Retail, funded through the PRR program
+               ![Image not loaded](https://drive.sipg.tecnico.ulisboa.pt/s/WdaAsmyYT8B3QWw/preview)
+               
+              Other relevant supporters that partially funded this work: [Fundação para a Ciência e Tecnologia](http://www.fct.pt), 
+              and ![Thales](https://drive.sipg.tecnico.ulisboa.pt/s/ABA8XPG7MjFgiaZ/preview) (Portugal)  """)
+            with gr.Tab("Webcam acquisition"):            
                 with gr.Row():
                     with gr.Column():
                         self.image_input = gr.Image(label="Input Image",type="numpy",interactive=True)
