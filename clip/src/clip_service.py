@@ -19,11 +19,11 @@ from importlib.machinery import SourceFileLoader
 
 clip_pb2 = SourceFileLoader(
     "clip_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/clip_pb2.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./clip_pb2.py")
 ).load_module()
 clip_pb2_grpc = SourceFileLoader(
     "clip_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/clip_pb2_grpc.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./clip_pb2_grpc.py")
 ).load_module()
 
 
@@ -44,7 +44,8 @@ class CLIPService(clip_pb2_grpc.CLIPServiceServicer):
 
     def __init__(self):
         # Always load to CPU first
-        self._model, self._preprocess = clip.load("ViT-B/32", device="cpu")
+        self._model, self._preprocess = clip.load("ViT-B/32", device="cpu",
+                                                  download_root="./model")
         self._device = "cpu"
         logging.info("Model loaded on CPU")
 
@@ -82,7 +83,7 @@ class CLIPService(clip_pb2_grpc.CLIPServiceServicer):
         response = clip_pb2.CLIPResponse(
             image_emb=tensor_to_bytes(image_features),
             text_emb=tensor_to_bytes(text_features),
-            similarity=tensor_to_bytes(torch.tensor(logits_per_image))
+            similarity=tensor_to_bytes(torch.tensor(logits_per_image).detach())
         )
 
         return response
