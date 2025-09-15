@@ -16,6 +16,7 @@ from PIL import Image
 
 
 from importlib.machinery import SourceFileLoader
+
 clip_pb2 = SourceFileLoader(
     "clip_pb2",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/clip_pb2.py")
@@ -96,14 +97,15 @@ def run_codigo(request,model,device, preprocess):
         img = Image.open(image_stream).convert("RGB")
         received_images.append(img)
 
-    image = preprocess(received_images[0]).unsqueeze(0).to(device)
+
+    images = torch.stack([preprocess(im) for im in received_images]).to(device)
     text = clip.tokenize(request.texts).to(device)
 
     with torch.no_grad():
-        image_features = model.encode_image(image)
+        image_features = model.encode_image(images)
         text_features = model.encode_text(text)
         
-        logits_per_image, logits_per_text = model(image, text)
+        logits_per_image, logits_per_text = model(images, text)
         probs = logits_per_image.softmax(dim=-1).cpu().numpy()
 
     return image_features, text_features, logits_per_image
