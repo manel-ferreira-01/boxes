@@ -7,7 +7,7 @@ import logging
 import json
 import threading
 import pickle
-from utils import write_list_to_temp,force_resize_image
+from utils import write_list_to_temp,force_resize_image, extract_frames_resize_video
 from utils import getdictrowsfromjson, getrowsfromjson, getfromkey
 import tempfile
 
@@ -179,12 +179,20 @@ class GradioDisplay:
  
 #----------  DETECT Update ---------------
     def _update_sequence(self,img,label,request:gr.Request):
-        
-        if img is None:
-            return None, "No images uploaded!",None
-        else:
-            galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
-
+        try:
+            
+            if img is None:
+                return None, "No images uploaded!",None
+            if isinstance(img[0][0], str) :
+                video=img[0][0]
+                galeria=[[x,None] for x in extract_frames_resize_video(video,_IMG_MAX_SIZE) ]
+            else:
+                galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
+        except Exception as e:
+            tmp=f"Image format not accepted: {e}"
+            logging.error(tmp)
+            return None,tmp,None
+             
         #if there is an input image, process and wait for the answer
         try:
             with self.lock:    
@@ -215,9 +223,9 @@ class GradioDisplay:
                 else:
                     time.sleep(.5)
         except Exception as e:
-            logging.error(f"Error in update_trackingsequence: {e}")
+            logging.error(f"Error in detect update_sequence: {e}")
             time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e}",None
+            return None, f"Error in detect update_sequence : {e}",None
 
     #---- TRACKING PROCESS -- TODO: collapse with detection into one single function.
     # Change form to have tracking as a tick (track/no track) in detection
