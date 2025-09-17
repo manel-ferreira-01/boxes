@@ -22,7 +22,7 @@ ARG SERVICE_NAME
 ARG PROTOS_FOLDER_DIR=protos
 
 RUN pip install --upgrade pip && \
-    pip install grpcio grpcio-tools protobuf
+    pip install grpcio grpcio-tools==1.74.0 protobuf
 
 COPY ${PROTOS_FOLDER_DIR} ${WORKSPACE}/
 #COPY image_generic.proto ${WORKSPACE}/
@@ -56,7 +56,7 @@ RUN addgroup --system ${GROUP} && \
 # Install requirements
 COPY requirements.txt .
 RUN apt update -y && \
-    apt install -y pip &&\
+    apt install -y pip ffmpeg libsm6 libxext6 &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade pip && \
     # Install headless version of opencv-python for server usage
@@ -95,6 +95,9 @@ RUN pip install -r ${WORKSPACE}/vggt/requirements.txt
 ENV TORCH_HOME=${WORKSPACE}/.cache
 ENV HF_HOME=${WORKSPACE}/.cache
 ENV HF_HUB_CACHE=${WORKSPACE}/.cache
+
+#copy vggt-1b.pt to workspace
+COPY --chown=${USER}:${GROUP} docker/vggt-1b.pt ${WORKSPACE}/vggt-1b.pt
 
 #print the torchhub cache path
 RUN echo "Torch hub cache path: $TORCH_HOME"

@@ -1,6 +1,6 @@
 services:
   interface:
-    image: sipgisr/gradio_display_multiple
+    image: sipgisr/displaygrpc
     ports:
     - 7860:7860
   yologpt:

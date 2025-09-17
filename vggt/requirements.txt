@@ -10,3 +10,7 @@ Pillow
 huggingface_hub
 einops
 safetensors
+trimesh
+gradio
+matplotlib
+opencv-python
