@@ -5,7 +5,7 @@ syntax = "proto3";
 package yolo;
 
 service YOLOservice {
-  rpc TrackSequence(YOLOGradioSeq) returns (YOLOGradioSeq);
+  rpc TrackSequence(YOLOGradioSeq) returns  (YOLOGradioSeq);
   rpc DetectSequence(YOLOGradioSeq) returns (YOLOGradioSeq);
   rpc AllProcessing(YOLOGradioSeq) returns (YOLOGradioSeq);
 }

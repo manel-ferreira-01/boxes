@@ -12,7 +12,7 @@ spec:
 kind: stage
 spec: 
   name: gradio-source
-  method: acquireasdasd
+  method: acquire
   address: interface:8061
   pipeline: VGGT
 ---

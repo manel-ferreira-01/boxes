@@ -6,7 +6,7 @@ services:
   vggtgrpc:
     image: sipgisr/vggtgrpc
     ports:
-    - 8061:8061
+    - 8062:8061
   maestro:
     image: duartemralves/maestro:v1-latest
     volumes:

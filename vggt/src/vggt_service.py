@@ -21,11 +21,11 @@ import pickle
 from importlib.machinery import SourceFileLoader
 vggt_pb2 = SourceFileLoader(
     "vggt_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/vggt_pb2.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./vggt_pb2.py")
 ).load_module()
 vggt_pb2_grpc = SourceFileLoader(
     "vggt_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../protos/vggt_pb2_grpc.py")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./vggt_pb2_grpc.py")
 ).load_module()
 
 from vggt.models.vggt import VGGT
@@ -55,7 +55,10 @@ class VGGTService(vggt_pb2_grpc.VGGTServiceServicer):
 
     def __init__(self):
         # Always load to CPU first
-        self._model = VGGT.from_pretrained("facebook/VGGT-1B").to("cpu")
+        self._model = VGGT()
+        self._model.load_state_dict(
+            torch.load("vggt-1b.pt", map_location="cpu")
+        )
         self._device = "cpu"
         logging.info("Model loaded on CPU")
 
