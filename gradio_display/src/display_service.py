@@ -28,8 +28,10 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         self.input_count=0;
 
     def acquire(self, request, context):       # while True:        for i in range(3):
+        logging.info("starting to acquire")
         # Read in.mat if exists and returns grpc message
         if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
+            logging.info(f"DISPLAY : Acquiring data from {self.gradio_display.input_data_file}")
             try:
                 with lock:
                     with open(self.gradio_display.input_data_file, 'rb') as f:
@@ -40,9 +42,16 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                     img=gradio_data['gradio'][0][0];
                     image_bytes=[cv2.imencode('.jpg', img)[1].tobytes() ]
                      #-----generate a list of encoded images from a gallery
+
                 elif gradio_data["command"]=="detectsequence" or gradio_data["command"]=="tracksequence":
                     gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
                     image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+
+                elif gradio_data["command"]=="3d_infer":
+                    logging.info("3D INFER - acquire")
+                    gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
+                    image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+
                 else: # Update for the case of now labels
                     logging.error(f"No command in the json string")
                     
@@ -50,7 +59,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                 #--- Add annotations + counting, datetime
                 self.input_count=self.input_count+1
                 annotations={ "command":gradio_data["command"], 
-                              "user":gradio_data["gradio"][1],
+                              "user":gradio_data["gradio"][1], # supposedely it is "user input"
                               "input_count":self.input_count,
                               "timestamp":datetime.datetime.now().isoformat(),
                               "yoloconfig":"vai aqui a configuraçao"#isto não é aqui ... 
@@ -64,10 +73,11 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
             annotations= {"empty":"empty"}
             _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8')) #zero image just in case
             image_bytes= [tmp.tobytes()]
+            logging.info(f"DISPLAY : No data file {self.gradio_display.input_data_file} found, sending empty response")
 
         label= json.dumps([{"aispgradio":annotations}])
         images = image_bytes
-#        logging.info("DISPLAY : Sending data ")
+        logging.info("DISPLAY : Sending data ")
 
         return display_pb2.AcquireResponse(label=label, image= images )
 
@@ -91,11 +101,19 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                             with lock:
                                 with open(self.gradio_display.output_data_file, 'wb') as f:
                                     pickle.dump([image_np,request.label],f)
+
                         elif "tracksequence" in l["aispgradio"]["command"] :
                             image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
                             with lock:
                                 with open(self.gradio_display.output_data_file, 'wb') as f:
                                     pickle.dump([image_np,request.label],f)
+
+                        elif "3d_infer" in l["aispgradio"]["command"] :
+                            glb_file = pickle.loads(request.vis) if request.vis else None
+                            with lock:
+                                with open(self.gradio_display.output_data_file, 'wb') as f:
+                                    pickle.dump([glb_file,request.label],f)
+                                    
                         else:
                             tmp=l["aispgradio"]
                             logging.error(f"Tem AISPGRADIO MAS NAO APANHOU KEYWORD NENHUMA {tmp}")
@@ -104,6 +122,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
             logging.error(f"ERRO NO DISPLAY: {e}")
            
         print("------------End Display -------------------------")    
+        logging.info("DISPLAY : End display")
         return display_pb2.DisplayResponse()
 
 # --- gRPC Server Launchers ---
