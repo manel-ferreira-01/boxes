@@ -1,0 +1,15 @@
+services:
+  interface:
+    image: sipgisr/displaygrpc
+    ports:
+    - 7860:7860
+  vggtgrpc:
+    image: sipgisr/vggtgrpc
+    ports:
+    - 8061:8061
+  maestro:
+    image: duartemralves/maestro:v1-latest
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /config.yaml

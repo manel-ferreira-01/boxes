@@ -1,0 +1,38 @@
+kind: pipeline
+spec:
+  name: VGGT
+---
+kind: stage
+spec:
+  name: vggtgrpc
+  method: Forward
+  address: vggtgrpc:8061
+  pipeline: VGGT
+---
+kind: stage
+spec: 
+  name: gradio-source
+  method: acquireasdasd
+  address: interface:8061
+  pipeline: VGGT
+---
+kind: stage
+spec: 
+  name: gradio-display
+  method: display
+  address: interface:8061
+  pipeline: VGGT
+---
+kind: link
+spec:
+  name: vggt-gradio
+  source_stage: vggtgrpc
+  target_stage: gradio-display
+  pipeline: VGGT
+---
+kind: link
+spec:
+  name: gradio-vggt
+  source_stage: gradio-source
+  target_stage: vggtgrpc
+  pipeline: VGGT

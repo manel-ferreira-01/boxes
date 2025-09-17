@@ -7,6 +7,7 @@ rpc Forward(VGGTRequest) returns (VGGTResponse);
 message VGGTRequest {
     repeated bytes images = 1;  // USED PIL TO PILE BYTES
     bytes query_points = 2; // Optional — client may omit shape/data
+    string config_json = 3; // configuration file
 }
 
 message VGGTResponse {
@@ -19,7 +20,8 @@ message VGGTResponse {
 
     // Optional if query_points was passed
     bytes track = 7;
-    bytes vis = 8;
-    bytes conf = 9;
+    bytes conf = 8;
+
+    bytes vis = 9; // this is a gradio datatype gradio.scene so it needs to be pickled
 }
 
