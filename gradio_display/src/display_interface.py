@@ -97,19 +97,37 @@ class GradioDisplay:
                         self.image_output_gallery = gr.Gallery(label="Detected Objects",type="numpy")
                         self.label_output_gallery = gr.Textbox(label="Messages and Data", interactive=False)
                         self.output_files_gallery= gr.Files(file_count="multiple", label="Files: Processed Data")
+#---------------- TAB VGGT -----------------
+
+            with gr.Tab("3D reconstruction with VGGT"):
+                with gr.Row():
+                    with gr.Column():
+                        self.vggt_image_input_gallery = gr.Gallery(label="Input Images",type="numpy",interactive=True)
+                        self.vggt_label_input_gallery = gr.Textbox(label="User Input")
+                        run_vggt_btn = gr.Button("🔄 Reconstruct 3D")
+                    with gr.Column():
+                        self.vggt_threeD_viewer = gr.HTML(label="3D Viewer")
+
+            #callbacks
+            run_vggt_btn.click(
+                fn=self._update_vggt,
+                inputs=[self.vggt_image_input_gallery,self.vggt_label_input_gallery],
+                outputs=[self.vggt_threeD_viewer]
+            )
+
 #---Callbacks   Metodos- Button click
-                run_yolo_detseq_btn.click(
-                    fn=self._update_sequence,
-                    inputs=[self.image_input_gallery,self.label_input_gallery],
-                    outputs=[self.image_output_gallery, self.label_output_gallery,self.output_files_gallery]
-                )
-                run_yolo_trackseq_btn.click(
-                    fn=self._update_trackingsequence,
-                    inputs=[self.image_input_gallery,self.label_input_gallery],
-                    outputs=[self.image_output_gallery, self.label_output_gallery,self.output_files_gallery],
-                    concurrency_limit=2
-                )
-                
+            run_yolo_detseq_btn.click(
+                fn=self._update_sequence,
+                inputs=[self.image_input_gallery,self.label_input_gallery],
+                outputs=[self.image_output_gallery, self.label_output_gallery,self.output_files_gallery]
+            )
+            run_yolo_trackseq_btn.click(
+                fn=self._update_trackingsequence,
+                inputs=[self.image_input_gallery,self.label_input_gallery],
+                outputs=[self.image_output_gallery, self.label_output_gallery,self.output_files_gallery],
+                concurrency_limit=2
+            )
+
             self.output_files_gallery.download(self._delete_results_files,None,self.output_files_gallery)
         demo.queue(max_size=1)
         return demo
@@ -130,6 +148,34 @@ class GradioDisplay:
 #    if "detectsequence" in l['aispgradio']['command']:
 #        return DetectSequence(self,request,context)
 #    elif "tracksequence" in l['aispgradio']['command']:
+
+
+    def _update_vggt(self,img,label,request:gr.Request):
+            
+            logging.info("3D reconstruction request received")
+            if img is None:
+                return None
+            try:
+                with self.lock:    
+                    with open(self.input_data_file, 'wb') as f:
+                        pickle.dump({"gradio":[img,label],"command":"3d_infer"},f) # label is "user input"
+                        logging.info(f"vggt Data written to {self.input_data_file}")
+                        # after this the vggt container will read the file and delete it
+#------wait for response of the pipeline (imgs and json) -----------     
+                while True:
+                    if os.path.exists(self.output_data_file):# Need to lock while loading
+                        with self.lock:
+                            with open(self.output_data_file, 'rb') as f:
+                                ret_data=pickle.load(f)
+                            os.remove(self.output_data_file)
+                        return ret_data[0] # expecting the glb datatype
+                    else:
+                        time.sleep(.5)
+
+            except:
+                logging.error(f"Error in acquire: {e}")
+                time.sleep(0.1)
+                return None
  
 #----------  DETECT Update ---------------
     def _update_sequence(self,img,label,request:gr.Request):
