@@ -25,19 +25,17 @@ RUN pip install --upgrade pip && \
     pip install grpcio grpcio-tools==1.74.0 protobuf
 
 COPY ${PROTOS_FOLDER_DIR} ${WORKSPACE}/
-#COPY image_generic.proto ${WORKSPACE}/
 WORKDIR ${WORKSPACE}
 
 # Compile proto file and remove it
-RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. ${SERVICE_NAME}.proto
+RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. pipeline.proto
 
 
 # -----------------------------
 # Stage to generate final image
 # -----------------------------
 
-#FROM python:slim-buster
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 
+FROM nvidia/cuda:12.2.2-base-ubuntu22.04 
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME
@@ -62,11 +60,11 @@ RUN pip install --upgrade pip && \
     # Install headless version of opencv-python for server usage
     # Does not install graphical modules
     # See https://github.com/opencv/opencv-python#installation-and-usage
-    pip install -r requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt && \
     rm requirements.txt
 
 # COPY .proto file to root to meet ai4eu specifications
-COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/${SERVICE_NAME}.proto /
+COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/pipeline.proto /
 
 # Copy generated .py files to workspace
 COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/

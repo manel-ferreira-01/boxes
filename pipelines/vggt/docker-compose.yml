@@ -6,7 +6,13 @@ services:
   vggtgrpc:
     image: sipgisr/vggtgrpc
     ports:
-    - 8062:8061
+      - 8062:8061
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
   maestro:
     image: duartemralves/maestro:v1-latest
     volumes:

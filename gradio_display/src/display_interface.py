@@ -106,7 +106,7 @@ class GradioDisplay:
                         self.vggt_label_input_gallery = gr.Textbox(label="User Input")
                         run_vggt_btn = gr.Button("🔄 Reconstruct 3D")
                     with gr.Column():
-                        self.vggt_threeD_viewer = gr.HTML(label="3D Viewer")
+                        self.vggt_threeD_viewer = gr.Model3D()
 
             #callbacks
             run_vggt_btn.click(
@@ -164,11 +164,16 @@ class GradioDisplay:
 #------wait for response of the pipeline (imgs and json) -----------     
                 while True:
                     if os.path.exists(self.output_data_file):# Need to lock while loading
+                        logging.info(f"vggt Data found to read {self.output_data_file}")
                         with self.lock:
                             with open(self.output_data_file, 'rb') as f:
                                 ret_data=pickle.load(f)
                             os.remove(self.output_data_file)
-                        return ret_data[0] # expecting the glb datatype
+                            # write the glb file from the bytes received
+                            glb_file_path=os.path.join(self.tmp_data_folder,f"vggt_{request.session_hash}.glb")
+                            with open(glb_file_path,"wb") as f:
+                                f.write(ret_data[0])
+                        return glb_file_path # expecting the glb datatype
                     else:
                         time.sleep(.5)
 
