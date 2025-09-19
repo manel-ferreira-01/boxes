@@ -28,10 +28,8 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         self.input_count=0;
 
     def acquire(self, request, context):       # while True:        for i in range(3):
-        logging.info("starting to acquire")
         # Read in.mat if exists and returns grpc message
         if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
-            logging.info(f"DISPLAY : Acquiring data from {self.gradio_display.input_data_file}")
             try:
                 with lock:
                     with open(self.gradio_display.input_data_file, 'rb') as f:
@@ -77,46 +75,47 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
 
         label= json.dumps([{"aispgradio":annotations}])
         images = image_bytes
-        logging.info("DISPLAY : Sending data ")
 
         return display_pb2.AcquireResponse(label=label, image= images )
 
 
     def display(self, request, context):
+        logging.info("DISPLAY : New display request")
+        logging.info(request.label) 
         label=json.loads(request.label) 
-#        print(label)
+        
         try:#--- parse the label info
             for l in label:
-#                print("--LABEL---")
-#                print(l)
-                if type(l) is dict:
-                    if "aispgradio" in l:
-                        if "empty" in l['aispgradio']:
-                            return display_pb2.DisplayResponse()
-                        elif "single" in l["aispgradio"]["command"]:
-#                            print("--chegou imagem single---")
-                            self.gradio_display.update(request.image[0], request.label)
-                        elif "detectsequence" in l["aispgradio"]["command"] :
-                            image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
-                            with lock:
-                                with open(self.gradio_display.output_data_file, 'wb') as f:
-                                    pickle.dump([image_np,request.label],f)
+                if "aispgradio" == l:
+                    if "empty" in label['aispgradio'].keys():
+                        return display_pb2.DisplayResponse()
+                    
+                    elif "single" in l["aispgradio"]["command"]:
+                        print("--chegou imagem single---")
+                        self.gradio_display.update(request.image[0], request.label)
+                    elif "detectsequence" in l["aispgradio"]["command"] :
+                        image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
+                        with lock:
+                            with open(self.gradio_display.output_data_file, 'wb') as f:
+                                pickle.dump([image_np,request.label],f)
+                                
+                    elif "tracksequence" in l["aispgradio"]["command"] :
+                        image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
+                        with lock:
+                            with open(self.gradio_display.output_data_file, 'wb') as f:
+                                pickle.dump([image_np,request.label],f)
 
-                        elif "tracksequence" in l["aispgradio"]["command"] :
-                            image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
-                            with lock:
-                                with open(self.gradio_display.output_data_file, 'wb') as f:
-                                    pickle.dump([image_np,request.label],f)
-
-                        elif "3d_infer" in l["aispgradio"]["command"] :
-                            glb_file = pickle.loads(request.vis) if request.vis else None
-                            with lock:
-                                with open(self.gradio_display.output_data_file, 'wb') as f:
-                                    pickle.dump([glb_file,request.label],f)
-                                    
-                        else:
-                            tmp=l["aispgradio"]
-                            logging.error(f"Tem AISPGRADIO MAS NAO APANHOU KEYWORD NENHUMA {tmp}")
+                    elif "3d_infer" == label["aispgradio"]["command"] :
+                        logging.info("3D INFER - display")
+                        glb_file = (request.video) if request.video else None
+                        with lock:
+                            with open(self.gradio_display.output_data_file, 'wb') as f:
+                                pickle.dump([glb_file,request.label],f)
+                                logging.info("saved the glb_file")
+                                
+                    else:
+                        tmp=label["aispgradio"]
+                        logging.error(f"Tem AISPGRADIO MAS NAO APANHOU KEYWORD NENHUMA {tmp}")
         
         except Exception as e:
             logging.error(f"ERRO NO DISPLAY: {e}")

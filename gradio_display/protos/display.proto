@@ -1,34 +1,25 @@
 syntax = "proto3";
 
-package pipeline;
+//python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
 
-// A flexible typed value (scalar OR list)
-message Value {
-  oneof kind {
-    // Scalars
-    bytes b       = 1;  // binary blob (numpy/torch tensors, images, etc.)
-    string s      = 2;  // single string
-    bool flag     = 3;  // boolean
-    int64 i       = 4;  // integer
-    float f       = 5;  // float
+service DisplayService {
+  rpc display (DisplayRequest) returns (DisplayResponse);
+  rpc acquire (AcquireRequest) returns (AcquireResponse);
+}
+// Define an empty request message
+message AcquireRequest {}
 
-    // Lists
-    repeated string ss = 6;  // list of strings
-    repeated float fs  = 7;  // list of floats
-    repeated int64 is  = 8;  // list of ints
-    repeated bool bs   = 9;  // list of booleans
-  }
+// Define the response message
+message AcquireResponse {
+    string label = 1; // json string with gradio session or commands
+    repeated bytes image = 2; // image encoded as bytes (e.g., PNG or JPEG)
+    bytes video = 3;
 }
 
-// Universal envelope
-message Envelope {
-  string module = 1;                // Which module produced this? ("YOLO", "VGGT", "Display", ...)
-  map<string, Value> data = 2;      // Arbitrary typed outputs (tensors, configs, metadata, flags)
-  repeated bytes images = 3;        // Encoded images (JPEG/PNG)
-  bytes video = 4;                  // Encoded video (mp4, avi, ...)
+message DisplayRequest {
+  string label = 1;
+  repeated bytes image = 2;
+  bytes video = 3;
 }
 
-// Universal service interface
-service PipelineService {
-  rpc Process(Envelope) returns (Envelope);
-}
+message DisplayResponse {}

@@ -19,14 +19,12 @@ from PIL import Image
 import pickle
 
 from importlib.machinery import SourceFileLoader
-vggt_pb2 = SourceFileLoader(
-    "vggt_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./vggt_pb2.py")
-).load_module()
-vggt_pb2_grpc = SourceFileLoader(
-    "vggt_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./vggt_pb2_grpc.py")
-).load_module()
+import sys
+sys.path.append("./protos")
+import pipeline_pb2 as vggt_pb2
+import pipeline_pb2_grpc as vggt_pb2_grpc
+from aux import wrap_value, unwrap_value
+
 
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
@@ -51,13 +49,13 @@ import threading
 import json
 
 
-class VGGTService(vggt_pb2_grpc.VGGTServiceServicer):
+class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
     def __init__(self):
         # Always load to CPU first
         self._model = VGGT()
         self._model.load_state_dict(
-            torch.load("vggt-1b.pt", map_location="cpu")
+            torch.load("./vggt-1b.pt", map_location="cpu")
         )
         self._device = "cpu"
         logging.info("Model loaded on CPU")
@@ -74,58 +72,61 @@ class VGGTService(vggt_pb2_grpc.VGGTServiceServicer):
             time.sleep(10)  # check every 10s
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > IDLE_TIMEOUT and self._device == "cuda:1":
+                if idle_time > IDLE_TIMEOUT and self._device == "cpu":
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
                     self._device = "cpu"
 
-    def Forward(self, request, context):
-
+    def move_to_gpu(self):
         with self._lock:
             self._last_request_time = time.time()
-            # If idle watchdog moved it back to CPU, restore to GPU
             if self._device == "cpu" and torch.cuda.is_available():
-                logging.info("Request received: moving model to GPU")
+                logging.info("Moving model to GPU")
                 self._model.to("cuda:1")
                 self._device = "cuda:1"
+
+    def Process(self, request, context):
 
         results = {}
         if request.config_json:
             config_json = json.loads(request.config_json)
-            print(config_json)
+            logging.info(config_json)
             for entry in config_json:
                 if entry == "aispgradio":
-                    if "empty" in config_json["aispgradio"].keys():
+                    if "empty" in config_json[entry].keys():
                         logging.info("Empty request received, returning empty response")
-                        return vggt_pb2.VGGTResponse()
-                    elif "command" in config_json["aispgradio"]:
-                        if "3d_infer" in config_json["aispgradio"]["command"]:
+                        return vggt_pb2.Envelope(json= json.dumps({'aispgradio': {'empty': 'empty'}}))
+                    elif "command" in config_json[entry]:
+                        if "3d_infer" in config_json[entry]["command"]:
                             logging.info("3D inference request received")
                             # Run inference
+                            self.move_to_gpu()
                             results, glb_file = run_codigo(request, self._model, self._device)
         else:
             logging.info("No config_json provided, returning empty response")
-            return vggt_pb2.VGGTResponse()
+            return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
         
         # if there is a valid response, serialize tensors to bytes
-        response = vggt_pb2.VGGTResponse(
-            pose_enc=tensor_to_bytes(results["pose_enc"]),
-            depth=tensor_to_bytes(results["depth"]),
-            depth_conf=tensor_to_bytes(results["depth_conf"]),
-            world_points=tensor_to_bytes(results["world_points"]),
-            world_points_conf=tensor_to_bytes(results["world_points_conf"]),
-            images=tensor_to_bytes(torch.tensor(results["images"])),
-            vis=pickle.dumps(glb_file)
+        response = vggt_pb2.Envelope(
+            config_json=json.dumps({'aispgradio': {'command': '3d_infer'}}),
+            data={"world_points": wrap_value(tensor_to_bytes(results["world_points"])),
+                  "world_points_conf": wrap_value(tensor_to_bytes(results["world_points_conf"])),
+                    "depth": wrap_value(tensor_to_bytes(results["depth"])),
+                    "depth_conf": wrap_value(tensor_to_bytes(results["depth_conf"])),
+                    "extrinsic": wrap_value(tensor_to_bytes(results["extrinsic"])),
+                    "intrinsic": wrap_value(tensor_to_bytes(results["intrinsic"])),
+                    "images": wrap_value(tensor_to_bytes(torch.tensor(results["images"]))),
+                    "glb_file" : wrap_value(glb_file)} # already bytes
         )
 
 
         return response
 
-def run_codigo(datafile,model,device):
+def run_codigo(request,model,device):
 
     received_images = []
-    for image_bytes in datafile.images:
+    for image_bytes in unwrap_value(request.data["images"]):
         image_stream = io.BytesIO(image_bytes)
         img = Image.open(image_stream).convert("RGB")
         img_np = np.array(img)
@@ -153,10 +154,12 @@ def run_codigo(datafile,model,device):
     #add images to output
     predictions["images"] = images.cpu().numpy()
 
-    glb_file = predictions_to_glb(predictions)
+    # create a file like object to export the glb file
+    glb_scene = predictions_to_glb(predictions, prediction_mode="Pointmap Regression", conf_thres=10.0)
+    b = glb_scene.export(file_type="glb")
 
     # Move everything to CPU for serialization
-    return predictions, glb_file
+    return predictions, b
 
 
 
@@ -214,12 +217,12 @@ if __name__ == '__main__':
     server = grpc.server(futures.ThreadPoolExecutor(),
                          options= [('grpc.max_send_message_length', 512 * 1024 * 1024), 
                                    ('grpc.max_receive_message_length', 512 * 1024 * 1024)])
-    vggt_pb2_grpc.add_VGGTServiceServicer_to_server(
-        VGGTService(), server)
+    vggt_pb2_grpc.add_PipelineServiceServicer_to_server(
+        PipelineService(), server)
 
     # Add reflection
     service_names = (
-        vggt_pb2.DESCRIPTOR.services_by_name['VGGTService'].full_name,
+        vggt_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)
