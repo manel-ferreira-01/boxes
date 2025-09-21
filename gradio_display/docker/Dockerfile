@@ -29,7 +29,7 @@ COPY ${PROTOS_FOLDER_DIR} ${WORKSPACE}/
 WORKDIR ${WORKSPACE}
 
 # Compile proto file and remove it
-RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${SERVICE_NAME}.proto
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. pipeline.proto
 
 
 # -----------------------------
@@ -60,7 +60,7 @@ RUN pip install --upgrade pip && \
     rm requirements.txt
 
 # COPY .proto file to root to meet ai4eu specifications
-COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/${SERVICE_NAME}.proto /
+COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/pipeline.proto /
 
 # Copy generated .py files to workspace
 COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
