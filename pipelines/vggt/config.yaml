@@ -5,7 +5,7 @@ spec:
 kind: stage
 spec:
   name: vggtgrpc
-  method: Forward
+  method: Process
   address: vggtgrpc:8061
   pipeline: VGGT
 ---

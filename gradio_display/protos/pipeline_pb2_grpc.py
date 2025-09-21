@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import display_pb2 as display__pb2
+import pipeline_pb2 as pipeline__pb2
 
-GRPC_GENERATED_VERSION = '1.71.0'
+GRPC_GENERATED_VERSION = '1.75.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in display_pb2_grpc.py depends on'
+        + f' but the generated code in pipeline_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -26,8 +26,7 @@ if _version_not_supported:
 
 
 class DisplayServiceStub(object):
-    """python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
-
+    """Universal service interface
     """
 
     def __init__(self, channel):
@@ -37,20 +36,19 @@ class DisplayServiceStub(object):
             channel: A grpc.Channel.
         """
         self.display = channel.unary_unary(
-                '/DisplayService/display',
-                request_serializer=display__pb2.DisplayRequest.SerializeToString,
-                response_deserializer=display__pb2.DisplayResponse.FromString,
+                '/pipeline.DisplayService/display',
+                request_serializer=pipeline__pb2.Envelope.SerializeToString,
+                response_deserializer=pipeline__pb2.Envelope.FromString,
                 _registered_method=True)
         self.acquire = channel.unary_unary(
-                '/DisplayService/acquire',
-                request_serializer=display__pb2.AcquireRequest.SerializeToString,
-                response_deserializer=display__pb2.AcquireResponse.FromString,
+                '/pipeline.DisplayService/acquire',
+                request_serializer=pipeline__pb2.Envelope.SerializeToString,
+                response_deserializer=pipeline__pb2.Envelope.FromString,
                 _registered_method=True)
 
 
 class DisplayServiceServicer(object):
-    """python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
-
+    """Universal service interface
     """
 
     def display(self, request, context):
@@ -70,25 +68,24 @@ def add_DisplayServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'display': grpc.unary_unary_rpc_method_handler(
                     servicer.display,
-                    request_deserializer=display__pb2.DisplayRequest.FromString,
-                    response_serializer=display__pb2.DisplayResponse.SerializeToString,
+                    request_deserializer=pipeline__pb2.Envelope.FromString,
+                    response_serializer=pipeline__pb2.Envelope.SerializeToString,
             ),
             'acquire': grpc.unary_unary_rpc_method_handler(
                     servicer.acquire,
-                    request_deserializer=display__pb2.AcquireRequest.FromString,
-                    response_serializer=display__pb2.AcquireResponse.SerializeToString,
+                    request_deserializer=pipeline__pb2.Envelope.FromString,
+                    response_serializer=pipeline__pb2.Envelope.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'DisplayService', rpc_method_handlers)
+            'pipeline.DisplayService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('DisplayService', rpc_method_handlers)
+    server.add_registered_method_handlers('pipeline.DisplayService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
 class DisplayService(object):
-    """python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. display.proto
-
+    """Universal service interface
     """
 
     @staticmethod
@@ -105,9 +102,9 @@ class DisplayService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/DisplayService/display',
-            display__pb2.DisplayRequest.SerializeToString,
-            display__pb2.DisplayResponse.FromString,
+            '/pipeline.DisplayService/display',
+            pipeline__pb2.Envelope.SerializeToString,
+            pipeline__pb2.Envelope.FromString,
             options,
             channel_credentials,
             insecure,
@@ -132,9 +129,9 @@ class DisplayService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/DisplayService/acquire',
-            display__pb2.AcquireRequest.SerializeToString,
-            display__pb2.AcquireResponse.FromString,
+            '/pipeline.DisplayService/acquire',
+            pipeline__pb2.Envelope.SerializeToString,
+            pipeline__pb2.Envelope.FromString,
             options,
             channel_credentials,
             insecure,

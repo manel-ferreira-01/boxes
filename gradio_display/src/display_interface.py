@@ -107,12 +107,13 @@ class GradioDisplay:
                         run_vggt_btn = gr.Button("🔄 Reconstruct 3D")
                     with gr.Column():
                         self.vggt_threeD_viewer = gr.Model3D()
+                        self.vggt_conf_threshold = gr.Slider(0, 50, value=20, step=1, label="Confidence Threshold")
 
             #callbacks
             run_vggt_btn.click(
                 fn=self._update_vggt,
-                inputs=[self.vggt_image_input_gallery,self.vggt_label_input_gallery],
-                outputs=[self.vggt_threeD_viewer]
+                inputs=[self.vggt_image_input_gallery,self.vggt_label_input_gallery,self.vggt_conf_threshold],
+                outputs=[self.vggt_threeD_viewer,]
             )
 
 #---Callbacks   Metodos- Button click
@@ -150,7 +151,7 @@ class GradioDisplay:
 #    elif "tracksequence" in l['aispgradio']['command']:
 
 
-    def _update_vggt(self,img,label,request:gr.Request):
+    def _update_vggt(self,img,label,conf_threshold,request:gr.Request):
             
             logging.info("3D reconstruction request received")
             if img is None:
@@ -158,7 +159,8 @@ class GradioDisplay:
             try:
                 with self.lock:    
                     with open(self.input_data_file, 'wb') as f:
-                        pickle.dump({"gradio":[img,label],"command":"3d_infer"},f) # label is "user input"
+                        pickle.dump({"gradio":[img,label],"command":"3d_infer",
+                                     "parameters":{"conf_threshold":conf_threshold}},f) # label is "user input"
                         logging.info(f"vggt Data written to {self.input_data_file}")
                         # after this the vggt container will read the file and delete it
 #------wait for response of the pipeline (imgs and json) -----------     

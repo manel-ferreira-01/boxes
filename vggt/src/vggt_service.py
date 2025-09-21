@@ -72,7 +72,7 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
             time.sleep(10)  # check every 10s
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > IDLE_TIMEOUT and self._device == "cpu":
+                if idle_time > IDLE_TIMEOUT and self._device == "cuda:0":
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
@@ -83,8 +83,8 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
             self._last_request_time = time.time()
             if self._device == "cpu" and torch.cuda.is_available():
                 logging.info("Moving model to GPU")
-                self._model.to("cuda:1")
-                self._device = "cuda:1"
+                self._model.to("cuda:0")
+                self._device = "cuda:0"
 
     def Process(self, request, context):
 
@@ -96,31 +96,39 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
                 if entry == "aispgradio":
                     if "empty" in config_json[entry].keys():
                         logging.info("Empty request received, returning empty response")
-                        return vggt_pb2.Envelope(json= json.dumps({'aispgradio': {'empty': 'empty'}}))
+                        return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
                     elif "command" in config_json[entry]:
                         if "3d_infer" in config_json[entry]["command"]:
                             logging.info("3D inference request received")
                             # Run inference
                             self.move_to_gpu()
                             results, glb_file = run_codigo(request, self._model, self._device)
+                            logging.info("3D inference completed")
         else:
             logging.info("No config_json provided, returning empty response")
             return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
         
         # if there is a valid response, serialize tensors to bytes
+        import zlib
         response = vggt_pb2.Envelope(
             config_json=json.dumps({'aispgradio': {'command': '3d_infer'}}),
             data={"world_points": wrap_value(tensor_to_bytes(results["world_points"])),
-                  "world_points_conf": wrap_value(tensor_to_bytes(results["world_points_conf"])),
-                    "depth": wrap_value(tensor_to_bytes(results["depth"])),
-                    "depth_conf": wrap_value(tensor_to_bytes(results["depth_conf"])),
-                    "extrinsic": wrap_value(tensor_to_bytes(results["extrinsic"])),
-                    "intrinsic": wrap_value(tensor_to_bytes(results["intrinsic"])),
-                    "images": wrap_value(tensor_to_bytes(torch.tensor(results["images"]))),
-                    "glb_file" : wrap_value(glb_file)} # already bytes
+                "world_points_conf": wrap_value(tensor_to_bytes(results["world_points_conf"])),
+                "depth": wrap_value(tensor_to_bytes(results["depth"])),
+                "depth_conf": wrap_value(tensor_to_bytes(results["depth_conf"])),
+                "extrinsic": wrap_value(tensor_to_bytes(results["extrinsic"])),
+                "intrinsic": wrap_value(tensor_to_bytes(results["intrinsic"])),
+                "images": wrap_value(tensor_to_bytes(torch.tensor(results["images"]))),
+                "glb_file" : wrap_value(glb_file)} # already bytes
         )
 
+        #print the size of glb_file in bytes
+        if 'glb_file' in response.data:
+            glb_size = len(unwrap_value(response.data['glb_file']))
+            logging.info(f"Size of glb_file: {glb_size / (1024 * 1024):.2f} MB")
+            logging.info(f"Size of glb_file (compressed): {len(zlib.compress(unwrap_value(response.data['glb_file'])))/(1024*1024):.2f} MB")
 
+        logging.info("Returning response from Process")
         return response
 
 def run_codigo(request,model,device):
@@ -144,8 +152,8 @@ def run_codigo(request,model,device):
         predictions = model(images, query_points=query_points)
 
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
-    predictions["extrinsic"] = extrinsic # TODO: ADD THIS TO THE PROTO
-    predictions["intrinsic"] = intrinsic
+    predictions["extrinsic"] = extrinsic.squeeze() # TODO: ADD THIS TO THE PROTO
+    predictions["intrinsic"] = intrinsic.squeeze()
 
     # Drop unnecessary intermediate outputs
     predictions.pop("pose_enc_list", None)
@@ -154,8 +162,16 @@ def run_codigo(request,model,device):
     #add images to output
     predictions["images"] = images.cpu().numpy()
 
+    #extract conf threshold from request
+    json_config = json.loads(request.config_json)
+    if json_config["aispgradio"]["parameters"] and "conf_threshold" in json_config["aispgradio"]["parameters"]:
+        conf_thres = json_config["aispgradio"]["parameters"]["conf_threshold"]
+    else:
+        conf_thres = 30  # default value
+    logging.info(f"Using confidence threshold: {conf_thres}")
+
     # create a file like object to export the glb file
-    glb_scene = predictions_to_glb(predictions, prediction_mode="Pointmap Regression", conf_thres=10.0)
+    glb_scene = predictions_to_glb(predictions, conf_thres=conf_thres)
     b = glb_scene.export(file_type="glb")
 
     # Move everything to CPU for serialization
@@ -215,8 +231,8 @@ if __name__ == '__main__':
         level=logging.INFO)
     #Create Server and add service
     server = grpc.server(futures.ThreadPoolExecutor(),
-                         options= [('grpc.max_send_message_length', 512 * 1024 * 1024), 
-                                   ('grpc.max_receive_message_length', 512 * 1024 * 1024)])
+                         options= [('grpc.max_send_message_length', -1), 
+                                   ('grpc.max_receive_message_length', -1)])
     vggt_pb2_grpc.add_PipelineServiceServicer_to_server(
         PipelineService(), server)
 

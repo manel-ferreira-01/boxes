@@ -2,11 +2,14 @@ services:
   interface:
     image: sipgisr/displaygrpc
     ports:
-    - 7860:7860
+      - 7861:7860   # Only expose if you want access from host
+    networks:
+      - mynet
+
   vggtgrpc:
     image: sipgisr/vggtgrpc
-    ports:
-      - 8062:8061
+    networks:
+      - mynet
     deploy:
       resources:
         reservations:
@@ -14,8 +17,17 @@ services:
             - capabilities: [gpu]
 
   maestro:
-    image: duartemralves/maestro:v1-latest
+    image: sipgisr/maestro:v1-latest
     volumes:
       - type: bind
         source: ./config.yaml
         target: /config.yaml
+    networks:
+      - mynet
+
+networks:
+  mynet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
