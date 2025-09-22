@@ -1,0 +1,52 @@
+kind: pipeline
+spec:
+  name: full_gradio
+---
+kind: stage
+spec:
+  name: vggtgrpc
+  method: Process
+  address: vggtgrpc:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec:
+  name: yologrpc
+  method: AllProcessing
+  address: yologrpc:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec: 
+  name: gradio-acquire
+  method: acquire
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec: 
+  name: gradio-display
+  method: display
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: gradio-vggt
+  source_stage: gradio-acquire
+  target_stage: vggtgrpc
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: gradio-yolo
+  source_stage: gradio-acquire
+  target_stage: yologrpc
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: yolo-gradio
+  source_stage: yologrpc
+  target_stage: gradio-display
+  pipeline: full_gradio

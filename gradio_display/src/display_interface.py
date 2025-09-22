@@ -201,38 +201,41 @@ class GradioDisplay:
             return None,tmp,None
              
         #if there is an input image, process and wait for the answer
-        try:
-            with self.lock:    
-                with open(self.input_data_file, 'wb') as f:
-                    pickle.dump({"gradio":[galeria,label],"command":"detectsequence"},f)    
-            
+#        try:
+        with self.lock:    
+            with open(self.input_data_file, 'wb') as f:
+                pickle.dump({"gradio":[galeria,label],
+                             "command":"detectsequence",
+                             "parameters": " "},f)    
+        
 #------wait for response of the pipeline (imgs and json) -----------     
-            while True:
-                if os.path.exists(self.output_data_file):# Need to lock while loading
-                    with self.lock:
-                        with open(self.output_data_file, 'rb') as f:
-                            ret_data=pickle.load(f)
-                        os.remove(self.output_data_file)
+        while True:
+            if os.path.exists(self.output_data_file):# Need to lock while loading
+                with self.lock:
+                    with open(self.output_data_file, 'rb') as f:
+                        ret_data=pickle.load(f)
+                    os.remove(self.output_data_file)
 # ---desdobra json para csv
-                    annotations= json.loads(ret_data[1])                    
-                    results=getrowsfromjson(getfromkey(annotations,"YOLO"))
-                   
-                    base,filepath= write_list_to_temp(results,prefix="detect_objects__",suffix=".csv")
-                    basej,filepathj= write_list_to_temp(ret_data[1],prefix="detect_objects__",suffix=".json")
-                    newfiles={base:filepath,basej:filepathj}
-                    
-                    if request.session_hash in  self.output_files:
-                        self.output_files[request.session_hash]["files"].update(newfiles)
-                    else:
-                        self.output_files.update({request.session_hash:{"files":newfiles}})
-                        
-                    return ret_data[0],annotations,list(self.output_files[request.session_hash]["files"].values())                
+                annotations= json.loads(ret_data[1])                    
+                logging.info(f"Data received from detection: {annotations} ")
+                results=getrowsfromjson(getfromkey([annotations],"YOLO"))
+                
+                base,filepath= write_list_to_temp(results,prefix="detect_objects__",suffix=".csv")
+                basej,filepathj= write_list_to_temp(ret_data[1],prefix="detect_objects__",suffix=".json")
+                newfiles={base:filepath,basej:filepathj}
+                
+                if request.session_hash in  self.output_files:
+                    self.output_files[request.session_hash]["files"].update(newfiles)
                 else:
-                    time.sleep(.5)
-        except Exception as e:
-            logging.error(f"Error in detect update_sequence: {e}")
-            time.sleep(10)
-            return None, f"Error in detect update_sequence : {e}",None
+                    self.output_files.update({request.session_hash:{"files":newfiles}})
+                    
+                return ret_data[0],annotations,list(self.output_files[request.session_hash]["files"].values())                
+            else:
+                time.sleep(.5)
+        #except Exception as e:
+        #    logging.error(f"Error in detect update_sequence: {e}")
+        #    time.sleep(10)
+        #    return None, f"Error in detect update_sequence : {e}",None
 
     #---- TRACKING PROCESS -- TODO: collapse with detection into one single function.
     # Change form to have tracking as a tick (track/no track) in detection
@@ -248,7 +251,9 @@ class GradioDisplay:
         try:
             with self.lock:    
                 with open(self.input_data_file, 'wb') as f:
-                    pickle.dump({"gradio":[galeria,label],"command":"tracksequence"},f)    
+                    pickle.dump({"gradio":[galeria,label],
+                                 "command":"tracksequence",
+                                 "parameters": ""},f)    
             
 #------wait for response of the pipeline (imgs and json) -----------     
             while True:
@@ -291,7 +296,9 @@ class GradioDisplay:
             with self.lock:
                 
                 with open(self.input_data_file, 'wb') as f:
-                    pickle.dump({"gradio":[[img],label],"command":"single"},f)    
+                    pickle.dump({"gradio":[[img],label],
+                                 "command":"single",
+                                 "parameters": ""},f)    
 #                savemat(self.input_data_file,{"img":img,"label":label})
         except Exception as e:
             logging.error(f"Error in update_acquire SAVEMAT: {e}")

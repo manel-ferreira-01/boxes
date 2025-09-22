@@ -32,41 +32,42 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
     def acquire(self, request, context):       # while True:        for i in range(3):
         # Read in.mat if exists and returns grpc message
         if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
-            try:
-                with lock:
-                    with open(self.gradio_display.input_data_file, 'rb') as f:
-                        gradio_data=pickle.load(f)  
-                    os.remove(self.gradio_display.input_data_file)
-                # generate a list with one single image
-                if gradio_data["command"]=="single":
-                    img=gradio_data['gradio'][0][0]
-                    image_bytes=[cv2.imencode('.jpg', img)[1].tobytes() ]
-                     #-----generate a list of encoded images from a gallery
+            #try:
+            with lock:
+                with open(self.gradio_display.input_data_file, 'rb') as f:
+                    gradio_data=pickle.load(f)  
+                os.remove(self.gradio_display.input_data_file)
+            # generate a list with one single image
+            if gradio_data["command"]=="single":
+                img=gradio_data['gradio'][0][0]
+                image_bytes=[cv2.imencode('.jpg', img)[1].tobytes() ]
+                    #-----generate a list of encoded images from a gallery
 
-                elif gradio_data["command"]=="detectsequence" or gradio_data["command"]=="tracksequence":
-                    gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
-                    image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+            elif gradio_data["command"]=="detectsequence" or gradio_data["command"]=="tracksequence":
+                gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
+                image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
 
-                elif gradio_data["command"]=="3d_infer":
-                    logging.info("3D INFER - acquire")
-                    gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
-                    image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+            elif gradio_data["command"]=="3d_infer":
+                logging.info("3D INFER - acquire")
+                gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
+                image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
 
-                else: # Update for the case of now labels
-                    logging.error(f"No command in the json string")
-                    
-                #--- Add annotations + counting, datetime
-                self.input_count=self.input_count+1
-                annotations={ "command":gradio_data["command"], 
-                              "user":gradio_data["gradio"][1], # supposedely it is "user input"
-                              "input_count":self.input_count,
-                              "timestamp":datetime.datetime.now().isoformat(),
-                              "parameters":gradio_data["parameters"] #optional parameters
-                            }
-            except Exception as e:
-                logging.error(f"Error in acquire: {e}")
-                time.sleep(0.1)
-                annotations={"erroracquire":f"Error in acquire: {e}"}
+            else: # Update for the case of now labels
+                logging.error(f"No command in the json string")
+                
+            #--- Add annotations + counting, datetime
+            self.input_count=self.input_count+1
+            logging.info(f"parameters: {gradio_data.keys()}")
+            annotations={ "command":gradio_data["command"], 
+                            "user":gradio_data["gradio"][1], # supposedely it is "user input"
+                            "input_count":self.input_count,
+                            "timestamp":datetime.datetime.now().isoformat(),
+                            "parameters":gradio_data["parameters"] #optional parameters
+                        }
+            #except Exception as e:
+            #    logging.error(f"Error in acquire: {e}")
+            #    time.sleep(0.1)
+            #    annotations={"erroracquire":f"Error in acquire: {e}"}
         else:
             time.sleep(2)
             annotations= {"empty":"empty"}
@@ -85,30 +86,32 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
 
         logging.info("DISPLAY : New display request")
         logging.info(request.config_json) 
-        label=json.loads(request.config_json) 
-        logging.info(label)
+        config_json=json.loads(request.config_json) 
+        logging.info(config_json)
         
-        for l in label:
-            if "aispgradio" == l:
-                if "empty" in label['aispgradio'].keys():
+        for entry in config_json:
+            if "aispgradio" in config_json.keys():
+                if "empty" in config_json['aispgradio'].keys():
                     return display_pb2.Envelope()
                 
-                #elif "single" in l["aispgradio"]["command"]:
-                #    print("--chegou imagem single---")
-                #    self.gradio_display.update(request.image[0], request.label)
-                #elif "detectsequence" in l["aispgradio"]["command"] :
-                #    image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
-                #    with lock:
-                #        with open(self.gradio_display.output_data_file, 'wb') as f:
-                #            pickle.dump([image_np,request.label],f)
-                #            
-                #elif "tracksequence" in l["aispgradio"]["command"] :
-                #    image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in request.image]
-                #    with lock:
-                #        with open(self.gradio_display.output_data_file, 'wb') as f:
-                #            pickle.dump([image_np,request.label],f)
+                elif "single" in config_json["aispgradio"]["command"]:
+                    print("--chegou imagem single---")
+                    logging.info(f"{type(unwrap_value(request.data['images'])[0])}")
+                    self.gradio_display.update(unwrap_value(request.data["images"])[0], request.config_json)
+                    
+                elif "detectsequence" in config_json["aispgradio"]["command"] :
+                    image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in unwrap_value(request.data["images"])]
+                    with lock:
+                        with open(self.gradio_display.output_data_file, 'wb') as f:
+                            pickle.dump([image_np,request.config_json],f)
+                            
+                elif "tracksequence" in config_json["aispgradio"]["command"] :
+                    image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in unwrap_value(request.data["images"])]
+                    with lock:
+                        with open(self.gradio_display.output_data_file, 'wb') as f:
+                            pickle.dump([image_np,request.config_json],f)
 
-                elif "3d_infer" == label["aispgradio"]["command"]:
+                elif "3d_infer" == config_json["aispgradio"]["command"]:
                     logging.info("3D INFER - display")
                     glb_file = (unwrap_value(request.data["glb_file"])) if unwrap_value(request.data["glb_file"]) else None
                     with lock:
@@ -117,7 +120,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                             logging.info("saved the glb_file")
                             
                 else:
-                    tmp=label["aispgradio"]
+                    tmp=config_json["aispgradio"]
                     logging.error(f"Tem AISPGRADIO MAS NAO APANHOU KEYWORD NENHUMA {tmp}")
         
            

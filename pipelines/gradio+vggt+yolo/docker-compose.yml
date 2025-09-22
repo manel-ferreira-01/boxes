@@ -5,12 +5,19 @@ services:
       - 7861:7860   # Only expose if you want access from host
     networks:
       - mynet
-
+  vggtgrpc:
+    image: sipgisr/vggtgrpc
+    networks:
+      - mynet
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
   yologrpc:
     image: sipgisr/yologrpc
     networks:
       - mynet
-
   maestro:
     image: sipgisr/maestro:v1-latest
     volumes:
@@ -23,4 +30,6 @@ services:
 networks:
   mynet:
     driver: bridge
-    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

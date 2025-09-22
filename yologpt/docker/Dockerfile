@@ -1,7 +1,7 @@
 ARG USER=worker
 ARG GROUP=workers
 ARG WORKSPACE=/workspace
-ARG PROTO_FILE=yolo.proto
+ARG PROTO_FILE=pipeline.proto
 ARG SRC_DIR=src
 
 # -------------------------------
