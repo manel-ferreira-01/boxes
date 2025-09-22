@@ -38,11 +38,11 @@ class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
         # Check if there is any command and if it empty
         if request.config_json:
             config_json=json.loads(request.config_json)
-            logging.info(f"YOLO AllProcessing: {config_json}")
+            #logging.info(f"YOLO AllProcessing: {config_json}")
             for entry in config_json:
                     if "aispgradio" in config_json.keys():
                         comm=config_json['aispgradio'].keys()
-                        logging.info(f"YOLO AllProcessing: {comm}")
+                        #logging.info(f"YOLO AllProcessing: {comm}")
                         try:
                             #------- Empty Packet , Do nothing ---------
                             if "empty" in config_json['aispgradio'].keys():
@@ -83,13 +83,12 @@ class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
                             
                     config_json.update({"YOLO": all_detections})
                     detections_json=json.dumps(config_json)
-                    print(annotated_images)
                     return yolo_pb2.Envelope(
                         data={"images": wrap_value(annotated_images)},
                         config_json=detections_json
                     )
         else:
-            logging.error(f'----label message is empty or no command {request.config_json}  ')
+            #logging.error(f'----label message is empty or no command {request.config_json}  ')
             return yolo_pb2.Envelope(
                 config_json=json.dumps({"YOLO":"error: Method AllProcessing requires json command"}),
                 data={"images": wrap_value(b'')}

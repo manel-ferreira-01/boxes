@@ -29,8 +29,7 @@ message Envelope {
 
 // Universal service interface
 service DisplayService {
-  rpc display (Envelope) returns (Envelope);
   rpc acquire (Envelope) returns (Envelope);
-  in_vgg
-  in_yolo
+  rpc display_yolo (Envelope) returns (Envelope);
+  rpc display_vggt (Envelope) returns (Envelope);
 }

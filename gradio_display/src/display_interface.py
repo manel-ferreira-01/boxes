@@ -16,29 +16,64 @@ _IMG_MAX_SIZE = 640
 #------------------------  Gradio DISPLAY OBJECT ---------      
 
 class GradioDisplay:
-    def __init__(self,tmp_data_folder="/tmp",lockfile=None):
-        # self.(gradio) image_input, label_input,image_outpu,label_output
-        self.image = None
-        self.label = "User label (ex: token)"
-        self.output_files_gallery=None
-        self.input_data_file=tmp_data_folder+"/in.mat"
-        self.output_data_file=tmp_data_folder+"/out.mat"
-        self.output_files={}
+    def __init__(self, tmp_data_folder="/tmp", lockfile=None):
         self.tmp_data_folder = tmp_data_folder
-        self.lock=lockfile
-        
+        self.lock = lockfile
+        self.output_files = {}
+
+        # central registry of in/out files by algorithm
+        self.file_map = {}
+        for algo in ["yolo", "vggt"]:
+            self.file_map[algo] = {
+                "in": os.path.join(tmp_data_folder, f"{algo}_in.mat"),
+                "out": os.path.join(tmp_data_folder, f"{algo}_out.mat"),
+            }
+        logging.info(f"Initialized file_map keys: {list(self.file_map.keys())}")
+
+
+        # cleanup old files
+        for algo, paths in self.file_map.items():
+            for f in paths.values():
+                if os.path.exists(f):
+                    os.remove(f)
+
+        tempfile.tempdir = tmp_data_folder
         self.interface = self._create_interface()
-        if os.path.exists(self.input_data_file):
-            os.remove(self.input_data_file)
-        if os.path.exists(self.output_data_file):
-            os.remove(self.output_data_file)
-        tempfile.tempdir=tmp_data_folder
-#-----------METHODS -----------------
+
+# ------------------------------------------------------------------
+    def _get_files(self, algo: str):
+        """Return (input_file, output_file) for a given algorithm."""
+        return self.file_map[algo]["in"], self.file_map[algo]["out"]
+
+    def _write_request(self, algo: str, data: dict):
+        in_file, _ = self._get_files(algo)
+        with self.lock:
+            with open(in_file, "wb") as f:
+                pickle.dump(data, f)
+
+        return in_file
+
+    def _wait_for_response(self, algo: str, transform_fn=None):
+        """Wait for response file of algo, optional transform on loaded data."""
+        _, out_file = self._get_files(algo)
+        while True:
+            if os.path.exists(out_file):
+                with self.lock:
+                    with open(out_file, "rb") as f:
+                        ret_data = pickle.load(f)
+                    os.remove(out_file)
+                return transform_fn(ret_data) if transform_fn else ret_data
+            else:
+                time.sleep(0.5)
+
+# ------------------------------------------------------------------
 
 #-------Launch the server ---------
     
     def launch(self,share=True, server_name="0.0.0.0", server_port=7860):
-        self.interface.launch(share=share, server_name=server_name, server_port=server_port)
+        self.interface.launch(
+            share=share, server_name=server_name, server_port=server_port
+            )
         
 #--------  Create Gradio Interface --------
     
@@ -68,21 +103,6 @@ class GradioDisplay:
                
               Other relevant supporters that partially funded this work: [Fundação para a Ciência e Tecnologia](http://www.fct.pt), 
               and ![Thales](https://drive.sipg.tecnico.ulisboa.pt/s/ABA8XPG7MjFgiaZ/preview) (Portugal)  """)
-            with gr.Tab("Webcam acquisition"):            
-                with gr.Row():
-                    with gr.Column():
-                        self.image_input = gr.Image(label="Input Image",type="numpy",interactive=True)
-                        self.label_input = gr.Textbox(label="Input,Labels")
-                        refresh_btn = gr.Button("🔄 Detect Objects", elem_id="refresh-btn")
-                    with gr.Column():
-                        self.image_output = gr.Image(label="Received Image", interactive=False)
-                        self.label_output = gr.Textbox(label="Label", interactive=False)
-                #   Metodos- Button click
-                refresh_btn.click(
-                    fn=self._update_acquire,
-                    inputs=[self.image_input,self.label_input],
-                    outputs=[self.image_output, self.label_output]
-                )
 #---------------- TAB Gallery para sequencias -----------------
 
             with gr.Tab("Detection/Tracking for Image Sequences"):
@@ -110,225 +130,158 @@ class GradioDisplay:
                         self.vggt_conf_threshold = gr.Slider(0, 50, value=20, step=1, label="Confidence Threshold")
 
             #callbacks
-            run_vggt_btn.click(
-                fn=self._update_vggt,
-                inputs=[self.vggt_image_input_gallery,self.vggt_label_input_gallery,self.vggt_conf_threshold],
-                outputs=[self.vggt_threeD_viewer,]
-            )
-
-#---Callbacks   Metodos- Button click
+            # Hook up callbacks
             run_yolo_detseq_btn.click(
                 fn=self._update_sequence,
-                inputs=[self.image_input_gallery,self.label_input_gallery],
-                outputs=[self.image_output_gallery, self.label_output_gallery,self.output_files_gallery]
+                inputs=[self.image_input_gallery, self.label_input_gallery],
+                outputs=[
+                    self.image_output_gallery,
+                    self.label_output_gallery,
+                    self.output_files_gallery,
+                ],
             )
             run_yolo_trackseq_btn.click(
                 fn=self._update_trackingsequence,
-                inputs=[self.image_input_gallery,self.label_input_gallery],
-                outputs=[self.image_output_gallery, self.label_output_gallery,self.output_files_gallery],
-                concurrency_limit=2
+                inputs=[self.image_input_gallery, self.label_input_gallery],
+                outputs=[
+                    self.image_output_gallery,
+                    self.label_output_gallery,
+                    self.output_files_gallery,
+                ],
+                concurrency_limit=2,
+            )
+            run_vggt_btn.click(
+                fn=self._update_vggt,
+                inputs=[
+                    self.vggt_image_input_gallery,
+                    self.vggt_label_input_gallery,
+                    self.vggt_conf_threshold,
+                ],
+                outputs=[self.vggt_threeD_viewer],
             )
 
-            self.output_files_gallery.download(self._delete_results_files,None,self.output_files_gallery)
         demo.queue(max_size=1)
         return demo
 
-#---Callback  Delete temporary files ---------
-    
-    def _delete_results_files(self,download_data: gr.DownloadData,request:gr.Request):
-        file_name = os.path.basename(download_data.file.path)
-        if request.session_hash:
-            toremove=self.output_files[request.session_hash]["files"].pop(file_name,None)
-            if toremove:
-                if os.path.exists(toremove):
-                    os.remove(toremove)
-            return list(self.output_files[request.session_hash]["files"].values())
+    def _update_vggt(self, img, label, conf_threshold, request: gr.Request):
+        if img is None:
+            return None
+        logging.info("3D reconstruction request received")
 
-#----------- COmmands for yolo container
-#    print(f"Yolo command:  {l['aispgradio']['command']}")
-#    if "detectsequence" in l['aispgradio']['command']:
-#        return DetectSequence(self,request,context)
-#    elif "tracksequence" in l['aispgradio']['command']:
+        self._write_request(
+            "vggt",
+            {
+                "gradio": [img, label],
+                "command": "3d_infer",
+                "parameters": {"conf_threshold": conf_threshold},
+            },
+        )
+        logging.info(f"written in:{self._get_files('vggt')}")
 
+        def transform(ret_data):
+            glb_file_path = os.path.join(
+                self.tmp_data_folder, f"vggt_{request.session_hash}.glb"
+            )
+            with open(glb_file_path, "wb") as f:
+                f.write(ret_data[0])
+            return glb_file_path
 
-    def _update_vggt(self,img,label,conf_threshold,request:gr.Request):
-            
-            logging.info("3D reconstruction request received")
-            if img is None:
-                return None
-            try:
-                with self.lock:    
-                    with open(self.input_data_file, 'wb') as f:
-                        pickle.dump({"gradio":[img,label],"command":"3d_infer",
-                                     "parameters":{"conf_threshold":conf_threshold}},f) # label is "user input"
-                        logging.info(f"vggt Data written to {self.input_data_file}")
-                        # after this the vggt container will read the file and delete it
-#------wait for response of the pipeline (imgs and json) -----------     
-                while True:
-                    if os.path.exists(self.output_data_file):# Need to lock while loading
-                        logging.info(f"vggt Data found to read {self.output_data_file}")
-                        with self.lock:
-                            with open(self.output_data_file, 'rb') as f:
-                                ret_data=pickle.load(f)
-                            os.remove(self.output_data_file)
-                            # write the glb file from the bytes received
-                            glb_file_path=os.path.join(self.tmp_data_folder,f"vggt_{request.session_hash}.glb")
-                            with open(glb_file_path,"wb") as f:
-                                f.write(ret_data[0])
-                        return glb_file_path # expecting the glb datatype
-                    else:
-                        time.sleep(.5)
-
-            except:
-                logging.error(f"Error in acquire: {e}")
-                time.sleep(0.1)
-                return None
+        return self._wait_for_response("vggt", transform_fn=transform)
  
 #----------  DETECT Update ---------------
-    def _update_sequence(self,img,label,request:gr.Request):
+    def _update_sequence(self, img, label, request: gr.Request):
+
+        #start by clearing previous outputs for this session
+        if request.session_hash in self.output_files:
+            self.output_files[request.session_hash]["files"] = {}
+        else:
+            self.output_files.update({request.session_hash: {"files": {}}})
+
+        if img is None:
+            return None, "No images uploaded!", None
         try:
-            
-            if img is None:
-                return None, "No images uploaded!",None
-            if isinstance(img[0][0], str) :
-                video=img[0][0]
-                galeria=[[x,None] for x in extract_frames_resize_video(video,_IMG_MAX_SIZE) ]
+            if isinstance(img[0][0], str):  # video path
+                video = img[0][0]
+                galeria = [
+                    [x, None] for x in extract_frames_resize_video(video, _IMG_MAX_SIZE)
+                ]
             else:
-                galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
+                galeria = [
+                    [force_resize_image(x, _IMG_MAX_SIZE), y] for (x, y) in img
+                ]
         except Exception as e:
-            tmp=f"Image format not accepted: {e}"
+            tmp = f"Image format not accepted: {e}"
             logging.error(tmp)
-            return None,tmp,None
-             
-        #if there is an input image, process and wait for the answer
-#        try:
-        with self.lock:    
-            with open(self.input_data_file, 'wb') as f:
-                pickle.dump({"gradio":[galeria,label],
-                             "command":"detectsequence",
-                             "parameters": " "},f)    
-        
-#------wait for response of the pipeline (imgs and json) -----------     
-        while True:
-            if os.path.exists(self.output_data_file):# Need to lock while loading
-                with self.lock:
-                    with open(self.output_data_file, 'rb') as f:
-                        ret_data=pickle.load(f)
-                    os.remove(self.output_data_file)
-# ---desdobra json para csv
-                annotations= json.loads(ret_data[1])                    
-                logging.info(f"Data received from detection: {annotations} ")
-                results=getrowsfromjson(getfromkey([annotations],"YOLO"))
-                
-                base,filepath= write_list_to_temp(results,prefix="detect_objects__",suffix=".csv")
-                basej,filepathj= write_list_to_temp(ret_data[1],prefix="detect_objects__",suffix=".json")
-                newfiles={base:filepath,basej:filepathj}
-                
-                if request.session_hash in  self.output_files:
-                    self.output_files[request.session_hash]["files"].update(newfiles)
-                else:
-                    self.output_files.update({request.session_hash:{"files":newfiles}})
-                    
-                return ret_data[0],annotations,list(self.output_files[request.session_hash]["files"].values())                
+            return None, tmp, None
+
+        self._write_request(
+            "yolo",
+            {"gradio": [galeria, label], "command": "detectsequence", "parameters": " "},
+        )
+        logging.info(f"written in:{self._get_files('yolo')}")
+
+        def transform(ret_data):
+            annotations = json.loads(ret_data[1])
+            results = getrowsfromjson(getfromkey([annotations], "YOLO"))
+            base, filepath = write_list_to_temp(
+                results, prefix="detect_objects__", suffix=".csv"
+            )
+            basej, filepathj = write_list_to_temp(
+                ret_data[1], prefix="detect_objects__", suffix=".json"
+            )
+            newfiles = {base: filepath, basej: filepathj}
+            if request.session_hash in self.output_files:
+                self.output_files[request.session_hash]["files"].update(newfiles)
             else:
-                time.sleep(.5)
-        #except Exception as e:
-        #    logging.error(f"Error in detect update_sequence: {e}")
-        #    time.sleep(10)
-        #    return None, f"Error in detect update_sequence : {e}",None
+                self.output_files.update({request.session_hash: {"files": newfiles}})
+            return (
+                ret_data[0],
+                annotations,
+                list(self.output_files[request.session_hash]["files"].values()),
+            )
+
+        return self._wait_for_response("yolo", transform_fn=transform)
+
 
     #---- TRACKING PROCESS -- TODO: collapse with detection into one single function.
     # Change form to have tracking as a tick (track/no track) in detection
 
-    def _update_trackingsequence(self,img,label,request:gr.Request):
-        
-        if img is None:
-            return None, "No images uploaded!",None
+    def _update_trackingsequence(self, img, label, request: gr.Request):
+
+        #start by clearing previous outputs for this session
+        if request.session_hash in self.output_files:
+            self.output_files[request.session_hash]["files"] = {}
         else:
-            galeria=[[force_resize_image(x,_IMG_MAX_SIZE),y] for (x,y) in img]
-
-        #if there is an input image, process and wait for the answer
-        try:
-            with self.lock:    
-                with open(self.input_data_file, 'wb') as f:
-                    pickle.dump({"gradio":[galeria,label],
-                                 "command":"tracksequence",
-                                 "parameters": ""},f)    
+            self.output_files.update({request.session_hash: {"files": {}}})
             
-#------wait for response of the pipeline (imgs and json) -----------     
-            while True:
-                if os.path.exists(self.output_data_file):# Need to lock while loading
-                    with self.lock:
-                        with open(self.output_data_file, 'rb') as f:
-                            ret_data=pickle.load(f)
-                        os.remove(self.output_data_file)
-# ---desdobra json para csv
-                    
-                    annotations= json.loads(ret_data[1])
-                    yoloannotations=getfromkey(annotations,"YOLO")
-                    if "ErrorYolo"  in yoloannotations:
-                        raise Exception(f"{yoloannotations}")
-                    results=getrowsfromjson(yoloannotations)
-                    base,filepath= write_list_to_temp(results,prefix="object_track__",suffix=".csv")
-                    basej,filepathj= write_list_to_temp(ret_data[1],prefix="object_track__",suffix=".json")
-                    newfiles={base:filepath,basej:filepathj}
-                    
-                    if request.session_hash in  self.output_files:
-                        self.output_files[request.session_hash]["files"].update(newfiles)
-                    else:
-                        self.output_files.update({request.session_hash:{"files":newfiles}})
-                        
-                    return ret_data[0],annotations,list(self.output_files[request.session_hash]["files"].values())                
-                else:
-                    time.sleep(.5)
-        except Exception as e:
-            logging.error(f"Error in update_trackingsequence: {e}")
-            time.sleep(10)
-            return None, f"Error in update_trackingsequence : {e} - annotations {annotations}",None
-        
-    def _update_acquire(self,img,label):
-    #if user input an image and clicked on button, store data to be sent by grpc
-    # and wait for result of processing
         if img is None:
-            return None, "No image"
-        #if there is an input image, process and wait for the answer
-        try:
-            with self.lock:
-                
-                with open(self.input_data_file, 'wb') as f:
-                    pickle.dump({"gradio":[[img],label],
-                                 "command":"single",
-                                 "parameters": ""},f)    
-#                savemat(self.input_data_file,{"img":img,"label":label})
-        except Exception as e:
-            logging.error(f"Error in update_acquire SAVEMAT: {e}")
-            return None, f"Error in update_acquire SAVEMAT: {e}"
-#------wait for response of the pipeline (imgs and json) -----------     
-        while True:
-            try:
-                if os.path.exists(self.output_data_file):# Need to lock while loading
-                    with self.lock:
-                        with open(self.output_data_file, 'rb') as f:
-                            ret_data=pickle.load(f)
-                        os.remove(self.output_data_file)
-                    return ret_data[0],json.dumps(json.loads(ret_data[1]),indent=4)
-                else:
-                    time.sleep(.1)
-            except Exception as e:
-                logging.error(f"UPDATE_ACQUIRE: Error during loadmat: {e}")
-                time.sleep(1)
-                return None,"Error in data"
+            return None, "No images uploaded!", None
+        galeria = [[force_resize_image(x, _IMG_MAX_SIZE), y] for (x, y) in img]
 
-    def update(self, image_bytes: bytes, label: str):
-        try:
-            image_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
-        except Exception as e:
-            logging.error(f"Error in update: {e}")
-            image_np = np.full((500, 500, 3),0, dtype = np.uint8)
-            label="Display Error" #------- put messages as keys in label
+        self._write_request(
+            "yolo",
+            {"gradio": [galeria, label], "command": "tracksequence", "parameters": ""},
+        )
 
-        with self.lock:
-             with open(self.output_data_file, 'wb') as f:
-                pickle.dump([image_np,label],f)  
-            
-#----------- 
+        def transform(ret_data):
+            annotations = json.loads(ret_data[1])
+            yoloannotations = getfromkey(annotations, "YOLO")
+            results = getrowsfromjson(yoloannotations)
+            base, filepath = write_list_to_temp(
+                results, prefix="object_track__", suffix=".csv"
+            )
+            basej, filepathj = write_list_to_temp(
+                ret_data[1], prefix="object_track__", suffix=".json"
+            )
+            newfiles = {base: filepath, basej: filepathj}
+            if request.session_hash in self.output_files:
+                self.output_files[request.session_hash]["files"].update(newfiles)
+            else:
+                self.output_files.update({request.session_hash: {"files": newfiles}})
+            return (
+                ret_data[0],
+                annotations,
+                list(self.output_files[request.session_hash]["files"].values()),
+            )
+
+        return self._wait_for_response("yolo", transform_fn=transform)

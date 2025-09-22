@@ -29,104 +29,130 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         self.gradio_display = gradio_display
         self.input_count=0
 
-    def acquire(self, request, context):       # while True:        for i in range(3):
-        # Read in.mat if exists and returns grpc message
-        if os.path.exists(self.gradio_display.input_data_file):# Need to lock while loading
-            #try:
-            with lock:
-                with open(self.gradio_display.input_data_file, 'rb') as f:
-                    gradio_data=pickle.load(f)  
-                os.remove(self.gradio_display.input_data_file)
-            # generate a list with one single image
-            if gradio_data["command"]=="single":
-                img=gradio_data['gradio'][0][0]
-                image_bytes=[cv2.imencode('.jpg', img)[1].tobytes() ]
-                    #-----generate a list of encoded images from a gallery
+    # ------------------------------------------------------
+    # Helpers
+    def _get_files(self, algo: str):
+        return self.gradio_display.file_map[algo]["in"], self.gradio_display.file_map[algo]["out"]
 
-            elif gradio_data["command"]=="detectsequence" or gradio_data["command"]=="tracksequence":
-                gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
-                image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+    def _wait_for_request(self, algo: str):
+        """Wait until the algorithm's in_file appears, then return its data."""
+        in_file, _ = self._get_files(algo)
+        while True:
+            if os.path.exists(in_file):
+                with lock:
+                    with open(in_file, "rb") as f:
+                        data = pickle.load(f)
+                    os.remove(in_file)
+                return data
+            time.sleep(0.2)
 
-            elif gradio_data["command"]=="3d_infer":
-                logging.info("3D INFER - acquire")
-                gg=gradio_data["gradio"][0] #a list of tuples [(im,caption)]                
-                image_bytes = [cv2.imencode('.jpg', img)[1].tobytes() for img in [im for im in [ggg[0]  for ggg in gg]]]
+    def _write_response(self, algo: str, payload):
+        """Write output to the algorithm's out_file."""
+        _, out_file = self._get_files(algo)
+        with lock:
+            with open(out_file, "wb") as f:
+                pickle.dump(payload, f)
 
-            else: # Update for the case of now labels
-                logging.error(f"No command in the json string")
-                
-            #--- Add annotations + counting, datetime
-            self.input_count=self.input_count+1
-            logging.info(f"parameters: {gradio_data.keys()}")
-            annotations={ "command":gradio_data["command"], 
-                            "user":gradio_data["gradio"][1], # supposedely it is "user input"
-                            "input_count":self.input_count,
-                            "timestamp":datetime.datetime.now().isoformat(),
-                            "parameters":gradio_data["parameters"] #optional parameters
-                        }
-            #except Exception as e:
-            #    logging.error(f"Error in acquire: {e}")
-            #    time.sleep(0.1)
-            #    annotations={"erroracquire":f"Error in acquire: {e}"}
-        else:
-            time.sleep(2)
-            annotations= {"empty":"empty"}
-            _,tmp=cv2.imencode('.jpg',np.zeros((2,2,3),dtype='uint8')) #zero image just in case
-            image_bytes= [tmp.tobytes()]
-            logging.info(f"DISPLAY : No data file {self.gradio_display.input_data_file} found, sending empty response")
+    def acquire(self, request, context):
+        """Handles the acquire() loop for any algorithm request.
+        Returns 'empty' if no file is available (non-blocking)."""
+        #logging.info("DISPLAY : acquire request")
+        time.sleep(1)
+        for algo in self.gradio_display.file_map.keys():
+            in_file, _ = self._get_files(algo)
+            logging.info(f"{in_file}")
+            
+            if os.path.exists(in_file):
+                logging.info(f"DISPLAY : Found data file {in_file}, processing")
+                with lock:
+                    with open(in_file, "rb") as f:
+                        gradio_data = pickle.load(f)
+                    os.remove(in_file)
 
-        out_json = json.dumps({"aispgradio":annotations})
-        images = image_bytes
+                # --- Encode images depending on command
+                if gradio_data["command"] in ("detectsequence", "tracksequence"):
+                    gg = gradio_data["gradio"][0]
+                    image_bytes = [
+                        cv2.imencode(".jpg", im)[1].tobytes()
+                        for im in [pair[0] for pair in gg]
+                    ]
 
-        return display_pb2.Envelope(config_json=out_json,
-                                    data={"images": wrap_value(images)} ) # list of bytes
+                elif gradio_data["command"] == "3d_infer":
+                    gg = gradio_data["gradio"][0]
+                    image_bytes = [
+                        cv2.imencode(".jpg", im)[1].tobytes()
+                        for im in [pair[0] for pair in gg]
+                    ]
 
-
-    def display(self, request, context):
-
-        logging.info("DISPLAY : New display request")
-        logging.info(request.config_json) 
-        config_json=json.loads(request.config_json) 
-        logging.info(config_json)
-        
-        for entry in config_json:
-            if "aispgradio" in config_json.keys():
-                if "empty" in config_json['aispgradio'].keys():
-                    return display_pb2.Envelope()
-                
-                elif "single" in config_json["aispgradio"]["command"]:
-                    print("--chegou imagem single---")
-                    logging.info(f"{type(unwrap_value(request.data['images'])[0])}")
-                    self.gradio_display.update(unwrap_value(request.data["images"])[0], request.config_json)
-                    
-                elif "detectsequence" in config_json["aispgradio"]["command"] :
-                    image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in unwrap_value(request.data["images"])]
-                    with lock:
-                        with open(self.gradio_display.output_data_file, 'wb') as f:
-                            pickle.dump([image_np,request.config_json],f)
-                            
-                elif "tracksequence" in config_json["aispgradio"]["command"] :
-                    image_np = [cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR) for img in unwrap_value(request.data["images"])]
-                    with lock:
-                        with open(self.gradio_display.output_data_file, 'wb') as f:
-                            pickle.dump([image_np,request.config_json],f)
-
-                elif "3d_infer" == config_json["aispgradio"]["command"]:
-                    logging.info("3D INFER - display")
-                    glb_file = (unwrap_value(request.data["glb_file"])) if unwrap_value(request.data["glb_file"]) else None
-                    with lock:
-                        with open(self.gradio_display.output_data_file, 'wb') as f:
-                            pickle.dump([glb_file,request.config_json],f)
-                            logging.info("saved the glb_file")
-                            
                 else:
-                    tmp=config_json["aispgradio"]
-                    logging.error(f"Tem AISPGRADIO MAS NAO APANHOU KEYWORD NENHUMA {tmp}")
-        
-           
-        print("------------End Display -------------------------")    
-        logging.info("DISPLAY : End display")
+                    logging.error("Unknown command in acquire")
+                    image_bytes = []
+
+                # --- Add metadata
+                self.input_count += 1
+                annotations = {
+                    "command": gradio_data["command"],
+                    "user": gradio_data["gradio"][1],
+                    "input_count": self.input_count,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "parameters": gradio_data.get("parameters", {}),
+                }
+
+                return display_pb2.Envelope(
+                    config_json=json.dumps({"aispgradio": annotations}),
+                    data={"images": wrap_value(image_bytes)},
+                )
+
+            else:
+                continue
+
+        out_json = json.dumps({"aispgradio":  {"empty": "empty"}})
+        _, tmp = cv2.imencode(".jpg", np.zeros((2, 2, 3), dtype="uint8"))
+        image_bytes = [tmp.tobytes()]
+        return display_pb2.Envelope(
+            config_json=out_json, data={"images": wrap_value(image_bytes)}
+        )
+
+
+    def display_yolo(self, request, context):
+        """Handles YOLO display (detect/track)."""
+        #logging.info("DISPLAY : YOLO request")
+        config_json = json.loads(request.config_json)
+        time.sleep(1)  # slight delay to ensure file is written
+
+        if "aispgradio" in config_json.keys():
+            if "empty" in config_json["aispgradio"].keys():
+                #logging.error("No aispgradio entry in config_json, returning empty response")
+                return display_pb2.Envelope()
+            elif config_json["aispgradio"]["command"] in ("detectsequence", "tracksequence"):
+                images = [
+                    cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
+                    for img in unwrap_value(request.data["images"])
+                ]
+                self._write_response("yolo", [images, request.config_json])
+            else:
+                #logging.error(f"Unknown command {config_json['aispgradio']['command']}, returning empty response")
+                return display_pb2.Envelope()
         return display_pb2.Envelope()
+
+    def display_vggt(self, request, context):
+        """Handles VGGT display (3D reconstruction)."""
+        #logging.info("DISPLAY : VGGT request")
+        config_json = json.loads(request.config_json)
+        time.sleep(1)  # slight delay to ensure file is written
+
+        if "aispgradio" in config_json.keys():
+            if "empty" in config_json["aispgradio"].keys():
+                #logging.error("No aispgradio entry in config_json, returning empty response")
+                return display_pb2.Envelope()
+            elif config_json["aispgradio"]["command"] in ("3d_infer", ):
+                glb_file = unwrap_value(request.data["glb_file"]) or None
+                self._write_response("vggt", [glb_file, request.config_json])
+            else:
+                #logging.error(f"Unknown command {config_json['aispgradio']['command']}, returning empty response")
+                return display_pb2.Envelope()
+        return display_pb2.Envelope()
+
 
 # --- gRPC Server Launchers ---
 
