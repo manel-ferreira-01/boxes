@@ -6,7 +6,7 @@ kind: stage
 spec:
   name: Yolodetect
   method: AllProcessing
-  address: yologpt:8061
+  address: yologrpc:8061
   pipeline: Yolo
 ---
 kind: stage

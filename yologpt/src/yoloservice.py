@@ -3,8 +3,12 @@ from concurrent import futures
 import grpc_reflection.v1alpha.reflection as grpc_reflection
 import logging
 import os
-import yolo_pb2
-import yolo_pb2_grpc
+import sys
+sys.path.append("../protos")
+import pipeline_pb2 as yolo_pb2
+import pipeline_pb2_grpc as yolo_pb2_grpc
+from aux import wrap_value, unwrap_value
+
 import cv2
 import numpy as np
 import json
@@ -17,9 +21,10 @@ _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 
-class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
+class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
     def __init__(self):
         self.model = YOLO("yolo11n.pt")  # Ensure this is YOLOv11
+        logging.info("YOLOv11 model loaded.")
 #       https://docs.ultralytics.com/modes/predict/#inference-arguments
  
        
@@ -28,46 +33,47 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
         Process multiple images from request.images (repeated bytes),
         run YOLO inference, return annotated images and detections.
         """
+        annotated_images = []
+        all_detections = {}
         # Check if there is any command and if it empty
-        
-        if request.yolo_config_json:
-            label=json.loads(request.yolo_config_json)
-            for l in label:
-                if type(l) is dict:
-                    if "aispgradio" in l.keys():
-                        comm=l['aispgradio'].keys()
+        if request.config_json:
+            config_json=json.loads(request.config_json)
+            logging.info(f"YOLO AllProcessing: {config_json}")
+            for entry in config_json:
+                    if "aispgradio" in config_json.keys():
+                        comm=config_json['aispgradio'].keys()
                         logging.info(f"YOLO AllProcessing: {comm}")
                         try:
                             #------- Empty Packet , Do nothing ---------
-                            if "empty" in l['aispgradio'].keys():
-                                return yolo_pb2.YOLOGradioSeq(
-                                    images=[bytes(1)],
-                                    yolo_config_json=request.yolo_config_json
+                            if "empty" in config_json['aispgradio'].keys():
+                                return yolo_pb2.Envelope(
+                                    config_json=request.config_json,
+                                    data={"images":wrap_value(b'')}
                                 )
                             #-------- Process Commands ----------
-                            elif "command" in l['aispgradio']:
-                                print(f"Yolo command:  {l['aispgradio']['command']}")
-                                logging.info(f'The command is : {request.yolo_config_json}  ')
+                            elif "command" in config_json['aispgradio']:
+                                print(f"Yolo command:  {config_json['aispgradio']['command']}")
+                                logging.info(f'The command is : {request.config_json}  ')
                                 #----- Detect in a sequence -------
-                                if "detectsequence" in l['aispgradio']['command']:
-                                    annotated_images,all_detections=DetectSequence(self.model,request.images,l['aispgradio'])
+                                if "detectsequence" in config_json['aispgradio']['command']:
+                                    annotated_images,all_detections=DetectSequence(self.model,unwrap_value(request.data["images"]),config_json['aispgradio'])
                                    
                                 #----- Track a sequence -------
-                                elif "tracksequence" in l['aispgradio']['command']:
+                                elif "tracksequence" in config_json['aispgradio']['command']:
                                     if hasattr(self.model.predictor,"trackers"):
                                         self.model.predictor.trackers[0].reset() 
-                                    annotated_images,all_detections=TrackSequence(self.model,request.images,l['aispgradio'])
+                                    annotated_images,all_detections=TrackSequence(self.model,unwrap_value(request.data["images"]),config_json['aispgradio'])
                                     print("YOLO: Foi ao tracksequence")       
                                     
-                                elif "single" in l['aispgradio']['command']:
-                                    annotated_images,all_detections=DetectSequence(self.model,request.images,l['aispgradio'])
+                                elif "single" in config_json['aispgradio']['command']:
+                                    annotated_images,all_detections=DetectSequence(self.model,unwrap_value(request.data["images"]),config_json['aispgradio'])
                                     print("YOLO: Foi ao Detect single")            
 
                                 else :
-                                    logging.error(f'----label message is empty or no command {request.yolo_config_json}  ')
-                                    return yolo_pb2.YOLOGradioSeq(
-                                        images=[bytes(1)],
-                                        yolo_config_json=json.dumps({"Error":"Method AllProcessing requires json command"})
+                                    logging.error(f'----label message is empty or no command {request.config_json}  ')
+                                    return yolo_pb2.Envelope(
+                                        config_json=json.dumps({"Error":"Method AllProcessing requires json command"}),
+                                        data={"images":wrap_value(b'')}
                                     )
                         except Exception as e:
                             logging.error(f'AllProcessing error:  {e}')
@@ -75,16 +81,18 @@ class YOLOServiceServicer(yolo_pb2_grpc.YOLOserviceServicer):
                             annotated_images = [labeled_image_bytes.tobytes()]
                             all_detections = {"ErrorYolo": f"TRACKING: {e}"}
                             
-                    label.append({"YOLO": all_detections})
-                    detections_json=json.dumps(label)
-                    return yolo_pb2.YOLOGradioSeq(
-                        images=annotated_images,yolo_config_json=detections_json
+                    config_json.update({"YOLO": all_detections})
+                    detections_json=json.dumps(config_json)
+                    print(annotated_images)
+                    return yolo_pb2.Envelope(
+                        data={"images": wrap_value(annotated_images)},
+                        config_json=detections_json
                     )
         else:
-            logging.error(f'----label message is empty or no command {request.yolo_config_json}  ')
-            return yolo_pb2.YOLOGradioSeq(
-                images=[bytes(1)],
-                yolo_config_json=json.dumps({"YOLO":"error: Method AllProcessing requires json command"})
+            logging.error(f'----label message is empty or no command {request.config_json}  ')
+            return yolo_pb2.Envelope(
+                config_json=json.dumps({"YOLO":"error: Method AllProcessing requires json command"}),
+                data={"images": wrap_value(b'')}
             )
                
 
@@ -99,6 +107,7 @@ def DetectSequence(model, images, yolo_config ):
     Process multiple images from request.images (repeated bytes),
     run YOLO inference, return annotated images and detections.
     """
+    logging.info("YOLO: DetectSequence")
     annotated_images = []
     all_detections = []  # list of lists (per-image detections)
     # Check if there is any command and if it empty
@@ -230,14 +239,14 @@ if __name__ == "__main__":
     #Create Server and add service
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10),
-        options= [('grpc.max_send_message_length', 1024 * 1024 * 1024), 
-                  ('grpc.max_receive_message_length', 1024 * 1024 * 1024)])
+        options= [('grpc.max_send_message_length', -1), 
+                  ('grpc.max_receive_message_length', -1)])
     
-    yolo_pb2_grpc.add_YOLOserviceServicer_to_server(YOLOServiceServicer(), server)
+    yolo_pb2_grpc.add_PipelineServiceServicer_to_server(PipelineService(), server)
 
     # Add reflection
     service_names = (
-        yolo_pb2.DESCRIPTOR.services_by_name['YOLOservice'].full_name,
+        yolo_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)

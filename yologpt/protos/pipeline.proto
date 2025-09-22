@@ -28,9 +28,8 @@ message Envelope {
 }
 
 // Universal service interface
-service DisplayService {
-  rpc display (Envelope) returns (Envelope);
-  rpc acquire (Envelope) returns (Envelope);
-  in_vgg
-  in_yolo
+service PipelineService {
+  rpc TrackSequence(Envelope) returns  (Envelope);
+  rpc DetectSequence(Envelope) returns (Envelope);
+  rpc AllProcessing(Envelope) returns (Envelope);
 }

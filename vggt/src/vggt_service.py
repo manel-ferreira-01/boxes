@@ -104,6 +104,9 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
                             self.move_to_gpu()
                             results, glb_file = run_codigo(request, self._model, self._device)
                             logging.info("3D inference completed")
+                        else:
+                            logging.error(f"Unknown command {config_json[entry]['command']}, returning empty response")
+                            return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
         else:
             logging.info("No config_json provided, returning empty response")
             return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
