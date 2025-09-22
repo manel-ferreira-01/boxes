@@ -25,8 +25,15 @@ spec:
 ---
 kind: stage
 spec: 
-  name: gradio-display
-  method: display
+  name: gradio-display_yolo
+  method: display_yolo
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec: 
+  name: gradio-display_vggt
+  method: display_vggt
   address: interface:8061
   pipeline: full_gradio
 ---
@@ -48,5 +55,12 @@ kind: link
 spec:
   name: yolo-gradio
   source_stage: yologrpc
-  target_stage: gradio-display
+  target_stage: gradio-display_yolo
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: vggt-gradio
+  source_stage: vggtgrpc
+  target_stage: gradio-display_vggt
   pipeline: full_gradio
