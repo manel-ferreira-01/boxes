@@ -72,7 +72,7 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
             time.sleep(10)  # check every 10s
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > IDLE_TIMEOUT and self._device == "cpu":
+                if idle_time > IDLE_TIMEOUT and self._device == "cuda:1":
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
@@ -83,8 +83,8 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
             self._last_request_time = time.time()
             if self._device == "cpu" and torch.cuda.is_available():
                 logging.info("Moving model to GPU")
-                self._model.to("cpu")
-                self._device = "cpu"
+                self._model.to("cuda:1")
+                self._device = "cuda:1"
 
     def Process(self, request, context):
 

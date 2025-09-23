@@ -265,7 +265,7 @@ class GradioDisplay:
 
         def transform(ret_data):
             annotations = json.loads(ret_data[1])
-            yoloannotations = getfromkey(annotations, "YOLO")
+            yoloannotations = getfromkey([annotations], "YOLO")
             results = getrowsfromjson(yoloannotations)
             base, filepath = write_list_to_temp(
                 results, prefix="object_track__", suffix=".csv"
