@@ -2,7 +2,7 @@ services:
   interface:
     image: sipgisr/displaygrpc
     ports:
-      - 7861:7860   # Only expose if you want access from host
+      - 7860:7860   # Only expose if you want access from host
     networks:
       - mynet
   vggtgrpc:
