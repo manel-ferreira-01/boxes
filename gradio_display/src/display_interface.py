@@ -280,6 +280,8 @@ class GradioDisplay:
         all_annotations = []
         all_files = {}
         annotated_frames = []
+        all_detections = []        # rows for CSV
+
 
         # --- Loop over frames ---
         for idx, (frame, y) in enumerate(galeria, start=1):
@@ -294,27 +296,31 @@ class GradioDisplay:
                 },
             )
 
-            def transform(ret_data):
+            def transform(ret_data, _frame_idx=idx):
                 annotations = json.loads(ret_data[1])
                 yoloannotations = getfromkey([annotations], "YOLO")
-                results = getrowsfromjson(yoloannotations)
 
-                # save per-frame csv/json
-                base, filepath = write_list_to_temp(
-                    results, prefix=f"object_track_{idx:04d}__", suffix=".csv"
-                )
-                basej, filepathj = write_list_to_temp(
-                    ret_data[1], prefix=f"object_track_{idx:04d}__", suffix=".json"
-                )
+                # rows already have frame index as first element
+                rows = list(getrowsfromjson(yoloannotations))
+                all_detections.extend(rows)
 
-                all_files.update({base: filepath, basej: filepathj})
                 all_annotations.append(annotations)
-
-                # 🔑 return only the image (ret_data[0] is list of images)
-                return ret_data[0][0]
+                return ret_data[0][0]  # annotated numpy image
 
             annotated_frame = self._wait_for_response("yolo", transform_fn=transform)
             annotated_frames.append(annotated_frame)
+
+        # --- Write merged CSV + JSON ---
+        base, filepath_csv = write_list_to_temp(
+            all_detections, prefix="object_track__", suffix=".csv"
+        )
+        basej, filepath_json = write_list_to_temp(
+            json.dumps(all_annotations), prefix="object_track__", suffix=".json"
+        )
+
+        self.output_files[request.session_hash]["files"].update(
+            {base: filepath_csv, basej: filepath_json}
+    )
 
         # --- Write stitched video preview ---
         h, w = annotated_frames[0].shape[:2]
