@@ -59,6 +59,8 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
     rm requirements.txt
 
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # COPY .proto file to root to meet ai4eu specifications
 COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/pipeline.proto /
 

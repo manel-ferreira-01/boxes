@@ -162,19 +162,10 @@ def TrackSequence(model, images, yolo_config):
     """
     annotated_images = []
     all_detections = []  # list of lists (per-image detections)
-    # Check if there is any command and if it empty
-    if "trackyoloconfig" in yolo_config:
-        print(f"Yolo Configuration parameters {yolo_config['trackyoloconfig']}")
-        configtrack=yolo_config['trackyoloconfig']
-        #extract yoloconfig parameters here
-        # Process each image
-    else:
-        configtrack={} # set the default parameters
+   
+    configtrack = yolo_config.get("trackyoloconfig", {})
+    stream_countdown = yolo_config.get("stream", None)
 
-    #------- parse yolo commands --------
-    if configtrack.pop("reset",None):#process commands (TODO)
-# ---->      --MUST CHECK trackers  EXISTS 
-        model.predictor.trackers[0].reset() #reset tracker ID's
     
     for img_bytes in images:
         nparr = np.frombuffer(img_bytes, np.uint8)
@@ -196,21 +187,22 @@ def TrackSequence(model, images, yolo_config):
 
         for r in results:
             for b in r.boxes:
-                track_id = int(b.id.item()) if b.id is not None else -1
-                class_id = int(b.cls)
-                class_name = names.get(class_id, f"class_{class_id}")
-                conf = float(b.conf)
-                box = b.xyxy[0].tolist()
                 detections_for_img.append({
-                    "track_id": track_id,
-                    "bbox": box,
-                    "confidence": conf,
-                    "class_id": class_id,
-                    "class_name": class_name
+                    "track_id": int(b.id.item()) if b.id is not None else -1,
+                    "bbox": b.xyxy[0].tolist(),
+                    "confidence": float(b.conf),
+                    "class_id": int(b.cls),
+                    "class_name": names.get(int(b.cls), f"class_{int(b.cls)}")
                 })
 
 
         all_detections.append(detections_for_img)
+
+    #  Reset tracker when stream == 0
+    if stream_countdown == 0:
+        if hasattr(model.predictor, "trackers"):
+            model.predictor.trackers[0].reset()
+            logging.info("YOLO tracker reset at end of stream.")
 
     return annotated_images, all_detections
 

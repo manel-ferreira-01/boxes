@@ -1,0 +1,35 @@
+services:
+  interface:
+    image: sipgisr/displaygrpc
+    ports:
+      - 7861:7860   # Only expose if you want access from host
+    networks:
+      - test_net
+  vggtgrpc:
+    image: sipgisr/vggtgrpc
+    networks:
+      - test_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+  yologrpc:
+    image: sipgisr/yologrpc
+    networks:
+      - test_net
+  maestro:
+    image: sipgisr/maestro:v1-latest
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /config.yaml
+    networks:
+      - test_net
+
+networks:
+  test_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.50.0.0/16
