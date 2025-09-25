@@ -91,11 +91,11 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
         results = {}
         if request.config_json:
             config_json = json.loads(request.config_json)
-            logging.info(config_json)
+            #logging.info(config_json)
             for entry in config_json:
                 if entry == "aispgradio":
                     if "empty" in config_json[entry].keys():
-                        logging.info("Empty request received, returning empty response")
+                        #logging.info("Empty request received, returning empty response")
                         return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
                     elif "command" in config_json[entry]:
                         if "3d_infer" in config_json[entry]["command"]:
@@ -103,12 +103,12 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
                             # Run inference
                             self.move_to_gpu()
                             results, glb_file = run_codigo(request, self._model, self._device)
-                            logging.info("3D inference completed")
+                            #logging.info("3D inference completed")
                         else:
-                            logging.error(f"Unknown command {config_json[entry]['command']}, returning empty response")
+                            #logging.error(f"Unknown command {config_json[entry]['command']}, returning empty response")
                             return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
         else:
-            logging.info("No config_json provided, returning empty response")
+            #logging.info("No config_json provided, returning empty response")
             return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
         
         # if there is a valid response, serialize tensors to bytes
@@ -143,6 +143,11 @@ def run_codigo(request,model,device):
         img_np = np.array(img)
         received_images.append(img_np)
 
+    #check if images are all the same shape otherwise raise error
+    shapes = [img.shape for img in received_images]
+    if len(set(shapes)) != 1:
+        raise ValueError(f"All images must have the same shape, but got shapes: {shapes}")
+    
     images = torch.tensor(np.stack(received_images)).permute(0,3,1,2).to(device)
     images = preprocess_images_batch(images.float() / 255)
 

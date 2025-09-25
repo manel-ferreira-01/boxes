@@ -44,7 +44,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                         data = pickle.load(f)
                     os.remove(in_file)
                 return data
-            time.sleep(0.2)
+            time.sleep(0.01)
 
     def _write_response(self, algo: str, payload):
         """Write output to the algorithm's out_file."""
@@ -57,10 +57,10 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         """Handles the acquire() loop for any algorithm request.
         Returns 'empty' if no file is available (non-blocking)."""
         #logging.info("DISPLAY : acquire request")
-        time.sleep(1)
+        time.sleep(0.01)
         for algo in self.gradio_display.file_map.keys():
             in_file, _ = self._get_files(algo)
-            logging.info(f"{in_file}")
+            #logging.info(f"{in_file}")
             
             if os.path.exists(in_file):
                 logging.info(f"DISPLAY : Found data file {in_file}, processing")
@@ -118,7 +118,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         """Handles YOLO display (detect/track)."""
         #logging.info("DISPLAY : YOLO request")
         config_json = json.loads(request.config_json)
-        time.sleep(1)  # slight delay to ensure file is written
+        time.sleep(0.01)  # slight delay to ensure file is written
 
         if "aispgradio" in config_json.keys():
             if "empty" in config_json["aispgradio"].keys():
@@ -139,7 +139,7 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
         """Handles VGGT display (3D reconstruction)."""
         #logging.info("DISPLAY : VGGT request")
         config_json = json.loads(request.config_json)
-        time.sleep(1)  # slight delay to ensure file is written
+        time.sleep(0.01)  # slight delay to ensure file is written
 
         if "aispgradio" in config_json.keys():
             if "empty" in config_json["aispgradio"].keys():
