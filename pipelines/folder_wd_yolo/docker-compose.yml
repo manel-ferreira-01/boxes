@@ -1,0 +1,28 @@
+services:
+  folder_wdgrpc:
+    image: sipgisr/folder_wdgrpc
+    networks:
+      - mynet
+    volumes:
+      - ../../folder_wd/test/:/data:rw
+
+  yologrpc:
+    image: sipgisr/yologrpc
+    networks:
+      - mynet
+      
+  maestro:
+    image: sipgisr/maestro:v1-latest
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /config.yaml
+    networks:
+      - mynet
+
+networks:
+  mynet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
