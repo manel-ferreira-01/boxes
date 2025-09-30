@@ -1,6 +1,9 @@
 services:
   folder_wdgrpc:
     image: sipgisr/folder_wdgrpc
+    environment:
+      - INPUT_FOLDER=/data
+      - OUTPUT_FOLDER=/data/output
     networks:
       - mynet
     volumes:
