@@ -1,0 +1,38 @@
+kind: pipeline
+spec:
+  name: folder_wd_test
+---
+kind: stage
+spec:
+  name: yologrpc
+  method: AllProcessing
+  address: yologrpc:8061
+  pipeline: folder_wd_test
+---
+kind: stage
+spec: 
+  name: display
+  method: display
+  address: folder_wdgrpc:8061
+  pipeline: folder_wd_test
+---
+kind: stage
+spec:
+  name: acquire
+  method: acquire
+  address: folder_wdgrpc:8061
+  pipeline: folder_wd_test
+---
+kind: link
+spec:
+  name: acquire-yolo
+  source_stage: acquire
+  target_stage: yologrpc
+  pipeline: folder_wd_test
+---
+kind: link
+spec:
+  name: yolo-display
+  source_stage: yologrpc
+  target_stage: display
+  pipeline: folder_wd_test

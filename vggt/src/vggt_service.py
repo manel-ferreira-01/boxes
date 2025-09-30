@@ -185,7 +185,9 @@ def run_codigo(request,model,device):
     # Move everything to CPU for serialization
     return predictions, b
 
-
+# ----------------------------------------
+# Server setup and running
+# ----------------------------------------
 
 def get_port():
     """

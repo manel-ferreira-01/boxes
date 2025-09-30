@@ -5,6 +5,7 @@ services:
       - 7861:7860   # Only expose if you want access from host
     networks:
       - test_net
+      
   vggtgrpc:
     image: sipgisr/vggtgrpc
     networks:
@@ -18,6 +19,7 @@ services:
     image: sipgisr/yologrpc
     networks:
       - test_net
+
   maestro:
     image: sipgisr/maestro:v1-latest
     volumes:
