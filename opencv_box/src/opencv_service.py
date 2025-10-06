@@ -62,12 +62,13 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         parameters = json.loads(request.config_json)["opencv"]["parameters"]
         feature_extractor = parameters.get("feature_extractor", "SIFT")
         ratio_thresh = parameters.get("ratio_thresh", 0.75)
+        max_keypoints = parameters.get("max_keypoints", 500)
 
         # Detector setup
         if feature_extractor == "SIFT":
-            detector = cv2.SIFT_create()
+            detector = cv2.SIFT_create(nfeatures=max_keypoints)
         elif feature_extractor == "ORB":
-            detector = cv2.ORB_create(nfeatures=5000)
+            detector = cv2.ORB_create(nfeatures=max_keypoints)
         else:
             return folder_wd_pb2.Envelope(
                 config_json=json.dumps({"error": f"Unsupported extractor {feature_extractor}"})
@@ -89,7 +90,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         if len(imgs_in) != 2:
             result = {
                 "keypoints": wrap_value(np_to_bytes(keypoints_tensor)),
-                #"descriptors": wrap_value(np_to_bytes(descriptors_tensor))
+                "descriptors": wrap_value(np_to_bytes(descriptors_tensor))
             }
         else:
             # --- Two : FLANN + F-matrix ---
@@ -120,7 +121,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             # Serialize batched tensors
             result = {
                 "keypoints": wrap_value(np_to_bytes(keypoints_tensor)),
-                #"descriptors": wrap_value(np_to_bytes(descriptors_tensor)), # overflows gRPC limit
+                "descriptors": wrap_value(np_to_bytes(descriptors_tensor)), # overflows gRPC limit
                 "matches_inliers_a": wrap_value(np_to_bytes(inliersA)),
                 "matches_inliers_b": wrap_value(np_to_bytes(inliersB)),
                 "fundamental_matrix": wrap_value(np_to_bytes(F))
