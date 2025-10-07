@@ -4,3 +4,4 @@ grpcio-reflection
 grpcio-status
 numpy
 opencv-python-headless
+scikit-image

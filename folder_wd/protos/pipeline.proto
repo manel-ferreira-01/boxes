@@ -33,4 +33,5 @@ message Empty {}
 service PipelineService {
   rpc acquire(Empty) returns (Envelope);
   rpc display(Envelope) returns (Empty);
+  rpc display_opencv(Envelope) returns (Empty);
 }

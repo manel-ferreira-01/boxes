@@ -1,0 +1,38 @@
+kind: pipeline
+spec:
+  name: folder_wd_test
+---
+kind: stage
+spec:
+  name: opencvgrpc
+  method: similarity_check
+  address: opencvgrpc:8061
+  pipeline: folder_wd_test
+---
+kind: stage
+spec: 
+  name: display
+  method: display
+  address: folder_wdgrpc:8061
+  pipeline: folder_wd_test
+---
+kind: stage
+spec:
+  name: acquire
+  method: acquire
+  address: folder_wdgrpc:8061
+  pipeline: folder_wd_test
+---
+kind: link
+spec:
+  name: acquire-opencv
+  source_stage: acquire
+  target_stage: opencvgrpc
+  pipeline: folder_wd_test
+---
+kind: link
+spec:
+  name: opencv-display
+  source_stage: opencvgrpc
+  target_stage: display
+  pipeline: folder_wd_test
