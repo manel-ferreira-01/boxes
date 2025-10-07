@@ -26,105 +26,162 @@ import datetime
 import numpy as np
 
 class FileHandler(FileSystemEventHandler):
-    def __init__(self, process_fn,  settle_time=1.5):
+    """Watches the input folder for new image or video files."""
+    def __init__(self, process_fn, settle_time=1.5):
         self.process_fn = process_fn
         self.settle_time = settle_time
 
     def on_created(self, event):
-        if not event.is_directory and event.src_path.lower().endswith((".jpg",".png")):
-            logging.info(f"New image detected: {event.src_path}")
-            if self.wait_until_stable(event.src_path):
+        if event.is_directory:
+            return
+        if event.src_path.lower().endswith((".jpg", ".png", ".mp4", ".avi", ".mov", ".mkv")):
+            logging.info(f"New file detected: {event.src_path}")
+            if self._wait_until_stable(event.src_path):
                 self.process_fn(event.src_path)
             else:
                 logging.warning(f"File {event.src_path} not stable, skipped.")
-    
-    def wait_until_stable(self,path, check_interval=0.5, max_checks=10):
-        """Wait until file size stops changing, return True if stable."""
+
+    def _wait_until_stable(self, path, check_interval=0.5, max_checks=10):
         last_size = -1
         for _ in range(max_checks):
             try:
                 size = os.path.getsize(path)
             except FileNotFoundError:
-                return False  # file vanished
+                return False
             if size == last_size:
-                return True   # stable
+                return True
             last_size = size
             time.sleep(check_interval)
         return False
 
 
-
 class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
     def __init__(self):
-        self.input_folder = os.getenv('INPUT_FOLDER', '/data')
-        self.output_folder = os.getenv('OUTPUT_FOLDER', '/data/output')
+        self.input_folder = os.getenv("INPUT_FOLDER", "/data")
+        self.output_folder = os.getenv("OUTPUT_FOLDER", "/data/output")
         os.makedirs(self.input_folder, exist_ok=True)
         os.makedirs(self.output_folder, exist_ok=True)
-        logging.info(f"Input folder: {self.input_folder}")
 
-        self.input_count = 0
-        self.last_envelope = None
         self.lock = threading.Lock()
-        self.debounce_timer = None
-        self.debounce_seconds = 2.0
+        self.last_envelope = None
 
-        # process startup files if present
-        if any(f.lower().endswith((".jpg", ".png")) for f in os.listdir(self.input_folder)):
-            self._schedule_batch()
+        # --- video-specific state ---
+        self.video_frames = []
+        self.frame_index = 0
+        self.active_video = None
+        self.video_mode = False
 
-        # watchdog observer
-        event_handler = FileHandler(lambda path: self._schedule_batch())
+        # --- watchdog setup ---
+        event_handler = FileHandler(lambda path: self._schedule_process(path))
         self.observer = Observer()
         self.observer.schedule(event_handler, self.input_folder, recursive=False)
         self.observer.start()
+        logging.info(f"Watching folder: {self.input_folder}")
 
-    def _schedule_batch(self):
-        """(Re)start debounce timer to process folder as a batch."""
-        if self.debounce_timer:
-            self.debounce_timer.cancel()
-        self.debounce_timer = threading.Timer(self.debounce_seconds, self._process_folder)
-        self.debounce_timer.start()
+    # ------------------------------------------------------------------
+    # --- Dispatch based on file type
+    # ------------------------------------------------------------------
+    def _schedule_process(self, path):
+        if path.lower().endswith((".mp4", ".avi", ".mov", ".mkv")):
+            logging.info("Scheduling video processing")
+            threading.Thread(target=self._process_video, args=(path,), daemon=True).start()
+        elif path.lower().endswith((".jpg", ".png")):
+            logging.info("Scheduling image batch processing")
+            # if no videos in the folder, just process images
+            threading.Thread(target=self._process_images_batch, daemon=True).start()
 
-    def _process_folder(self):
-        """Actually read all images in folder and build Envelope."""
-        image_files = [f for f in os.listdir(self.input_folder)
-                       if f.lower().endswith((".jpg", ".png"))]
+    # ------------------------------------------------------------------
+    # --- Video handling
+    # ------------------------------------------------------------------
+    def _process_video(self, video_path):
+        """Extract frames and prepare first frame for processing."""
+        logging.info(f"Extracting frames from video: {video_path}")
+        cap = cv2.VideoCapture(video_path)
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            _, buf = cv2.imencode(".jpg", frame)
+            frames.append(buf.tobytes())
+        cap.release()
+
+        with self.lock:
+            self.video_frames = frames
+            self.frame_index = 0
+            self.active_video = os.path.basename(video_path)
+            self.video_mode = True
+            self._prepare_next_frame()
+
+        logging.info(f"Loaded {len(frames)} frames from {video_path}")
+
+    def _prepare_next_frame(self):
+        """Prepare the next frame as an envelope."""
+        if self.frame_index >= len(self.video_frames):
+            logging.info("All video frames processed.")
+            self.last_envelope = None
+            self.video_mode = False
+            return
+
+        frame_bytes = self.video_frames[self.frame_index]
+        
+        annotations = {
+            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5},
+            "frame_index": self.frame_index,
+            "video_name": self.active_video,
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+
+        logging.info(f"Prepared frame {self.frame_index} of video {self.active_video}")
+        self.last_envelope = folder_wd_pb2.Envelope(
+            config_json=json.dumps({"opencv": annotations}),
+            data={"images": wrap_value([frame_bytes])},
+        )
+
+    # ------------------------------------------------------------------
+    # --- Image batch handling
+    # ------------------------------------------------------------------
+    def _process_images_batch(self):
+        """Process all standalone images in the folder as a batch."""
+        image_files = [
+            f for f in os.listdir(self.input_folder)
+            if f.lower().endswith((".jpg", ".png"))
+        ]
         if not image_files:
             return
 
         images = []
-        for fname in sorted(image_files):  # deterministic order
+        for fname in sorted(image_files):
             path = os.path.join(self.input_folder, fname)
             img = cv2.imread(path)
             if img is None:
                 continue
             _, buf = cv2.imencode(".jpg", img)
             images.append(buf.tobytes())
-            #os.remove(path) # delete the imageq after reading
 
-        self.input_count += 1
         annotations = {
-            "command": "detectsequence",
-            "input_count": self.input_count,
+            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5},
             "timestamp": datetime.datetime.now().isoformat(),
+            "input_count": len(images),
         }
-        envelope = folder_wd_pb2.Envelope(
-            config_json=json.dumps({"aispgradio": annotations}),
-            data={"images": wrap_value(images)},
-        )
 
         with self.lock:
-            self.last_envelope = envelope
+            self.last_envelope = folder_wd_pb2.Envelope(
+                config_json=json.dumps({"opencv": annotations}),
+                data={"images": wrap_value(images)},
+            )
+            self.video_mode = False
 
-        logging.info(f"Prepared new batch of {len(images)} images")
+        logging.info(f"Prepared image batch of {len(images)} images")
 
+    # ------------------------------------------------------------------
+    # --- gRPC methods
+    # ------------------------------------------------------------------
     def acquire(self, request, context):
-        """Return prepared batch if available, else empty."""
-        
+        """Return next data packet to the next service."""
+        time.sleep(0.05)
         with self.lock:
             env = self.last_envelope
-
-        time.sleep(0.1)  # slight delay to allow batch to be set
 
         if env:
             # consume the envelope once (optional: clear it)
@@ -132,46 +189,66 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 self.last_envelope = None
             return env
         else:
-            # reply immediately with an "empty" message
-            out_json = json.dumps({"aispgradio": {"empty": "empty"}})
-            _, tmp = cv2.imencode(".jpg", np.zeros((2, 2, 3), dtype="uint8"))
-            return folder_wd_pb2.Envelope(
-                config_json=out_json,
-                data={"images": wrap_value([tmp.tobytes()])}
-            )
+            return folder_wd_pb2.Envelope()
 
-        
     def display(self, response, context):
-        """Receive processed results, save images to output folder."""
-        time.sleep(0.1)  # slight delay to allow batch to be set
+        """Receive OpenCV similarity_check results, decide whether to save and advance."""
         try:
-            images = unwrap_value(response.data["images"])
-            #logging.info(f"Received {len(images)} processed images")
-            if not images:
+            # --- Parse the JSON output safely ---
+            try:
+                out_json = json.loads(response.config_json) if response.config_json else {}
+            except Exception:
+                logging.error("Invalid JSON in display() response.")
                 return folder_wd_pb2.Empty()
 
-            saved_files = []
-            for idx, img_bytes in enumerate(images, start=1):
-                nparr = np.frombuffer(img_bytes, np.uint8)
-                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                if img is None:
-                    logging.warning(f"Could not decode image {idx}")
-                    continue
+            changed = out_json.get("changed", None)
+            ssim_val = out_json.get("ssim", None)
 
-                out_path = os.path.join(self.output_folder, f"processed_{idx:03d}.jpg")
-                cv2.imwrite(out_path, img)
-                saved_files.append(out_path)
+            # --- Validate we got a usable response ---
+            if changed is None:
+                #logging.warning(f"No 'changed' flag in response: {out_json}")
+                return folder_wd_pb2.Empty()
 
-            # save metadata/detections
-            meta_path = os.path.join(self.output_folder, "detections.json")
-            with open(meta_path, "w") as f:
-                f.write(response.config_json)
+            # --- Log SSIM and decision ---
+            if changed:
+                logging.info(f"Frame {self.frame_index}: CHANGE detected (SSIM={ssim_val:.3f}). Saving frame.")
+            else:
+                logging.info(f"Frame {self.frame_index}: No change (SSIM={ssim_val:.3f}). Skipping save.")
+
+            # --- Save frame only if change detected ---
+            if changed:
+                images = unwrap_value(response.data.get("images")) if response.data else []
+                if images:
+                    nparr = np.frombuffer(images[0], np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    out_path = os.path.join(self.output_folder, f"processed_{self.frame_index:05d}.jpg")
+                    cv2.imwrite(out_path, img)
+                    logging.info(f"Saved frame at: {out_path}")
+
+            # --- Advance to next frame regardless of change decision ---
+            if self.video_mode:
+                self.frame_index += 1
+                self._prepare_next_frame()
 
         except Exception as e:
-            logging.error(f"Error processing received data: {e}")
+            logging.error(f"Display error: {e}")
 
         return folder_wd_pb2.Empty()
+    
+    def display_opencv(self, response, context):
+        try:
+            
+            in_json = json.loads(response.config_json)
+            if in_json.get("changed") == True:
+                logging.info("got an image")
 
+        except Exception as e:
+            pass
+        
+        return folder_wd_pb2.Empty()
+
+
+    # ------------------------------------------------------------------
     def stop(self):
         self.observer.stop()
         self.observer.join()

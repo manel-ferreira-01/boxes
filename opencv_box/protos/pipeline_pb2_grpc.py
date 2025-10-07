@@ -40,6 +40,11 @@ class PipelineServiceStub(object):
                 request_serializer=pipeline__pb2.Envelope.SerializeToString,
                 response_deserializer=pipeline__pb2.Envelope.FromString,
                 _registered_method=True)
+        self.similarity_check = channel.unary_unary(
+                '/pipeline.PipelineService/similarity_check',
+                request_serializer=pipeline__pb2.Envelope.SerializeToString,
+                response_deserializer=pipeline__pb2.Envelope.FromString,
+                _registered_method=True)
 
 
 class PipelineServiceServicer(object):
@@ -52,11 +57,22 @@ class PipelineServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def similarity_check(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_PipelineServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Process': grpc.unary_unary_rpc_method_handler(
                     servicer.Process,
+                    request_deserializer=pipeline__pb2.Envelope.FromString,
+                    response_serializer=pipeline__pb2.Envelope.SerializeToString,
+            ),
+            'similarity_check': grpc.unary_unary_rpc_method_handler(
+                    servicer.similarity_check,
                     request_deserializer=pipeline__pb2.Envelope.FromString,
                     response_serializer=pipeline__pb2.Envelope.SerializeToString,
             ),
@@ -87,6 +103,33 @@ class PipelineService(object):
             request,
             target,
             '/pipeline.PipelineService/Process',
+            pipeline__pb2.Envelope.SerializeToString,
+            pipeline__pb2.Envelope.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def similarity_check(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/pipeline.PipelineService/similarity_check',
             pipeline__pb2.Envelope.SerializeToString,
             pipeline__pb2.Envelope.FromString,
             options,

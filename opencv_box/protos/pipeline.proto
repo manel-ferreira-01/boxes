@@ -32,4 +32,5 @@ message Empty {}
 // Universal service interface
 service PipelineService {
   rpc Process(Envelope) returns (Envelope);
+  rpc similarity_check(Envelope) returns (Envelope);
 }
