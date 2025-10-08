@@ -59,59 +59,75 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
         )
         self._device = "cpu"
         logging.info("Model loaded on CPU")
-
         self._last_request_time = time.time()
         self._lock = threading.Lock()
-
-        # Background thread to monitor idle time
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
     def _watchdog_loop(self):
         while True:
-            time.sleep(10)  # check every 10s
+            time.sleep(10)
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > IDLE_TIMEOUT and self._device == "cuda:0":
+                # Move back to CPU only if currently on GPU
+                if idle_time > IDLE_TIMEOUT and self._device.startswith("cuda"):
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
                     self._device = "cpu"
 
-    def move_to_gpu(self):
+    def set_device(self, target: str):
         with self._lock:
             self._last_request_time = time.time()
-            if self._device == "cpu" and torch.cuda.is_available():
-                logging.info("Moving model to GPU")
-                self._model.to("cuda:0")
-                self._device = "cuda:0"
+            target = target.lower()
+            if target.startswith("cuda") and not torch.cuda.is_available():
+                logging.warning("CUDA requested but not available. Staying on CPU.")
+                return self._device
+
+            if target == self._device:
+                return self._device
+
+            try:
+                logging.info(f"Reinitializing VGGT model on {target}")
+                # Reinstantiate model fresh on target device
+                new_model = VGGT().to(target)
+                new_model.load_state_dict(
+                    self._model.state_dict(), strict=False
+                )
+                # Replace old one
+                del self._model
+                torch.cuda.empty_cache()
+                self._model = new_model
+                self._device = target
+            except Exception as e:
+                logging.exception(f"Failed to move model to {target}: {e}")
+            return self._device
+
 
     def Process(self, request, context):
 
         results = {}
         if request.config_json:
             config_json = json.loads(request.config_json)
-            #logging.info(config_json)
             for entry in config_json:
                 if entry == "aispgradio":
                     if "empty" in config_json[entry].keys():
-                        #logging.info("Empty request received, returning empty response")
-                        return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
+                        return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
                     elif "command" in config_json[entry]:
+                        # Handle optional device parameter
+                        parameters = config_json[entry].get("parameters", {}) or {}
+                        requested_device = parameters.get("device")
+                        if requested_device:
+                            new_dev = self.set_device(requested_device)
+                            logging.info(f"Using device for inference: {new_dev}")
                         if "3d_infer" in config_json[entry]["command"]:
                             logging.info("3D inference request received")
-                            # Run inference
-                            self.move_to_gpu()
                             results, glb_file = run_codigo(request, self._model, self._device)
-                            #logging.info("3D inference completed")
                         else:
-                            #logging.error(f"Unknown command {config_json[entry]['command']}, returning empty response")
-                            return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
+                            return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
         else:
-            #logging.info("No config_json provided, returning empty response")
-            return vggt_pb2.Envelope(config_json= json.dumps({'aispgradio': {'empty': 'empty'}}))
+            return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
         
-        # if there is a valid response, serialize tensors to bytes
         import zlib
         response = vggt_pb2.Envelope(
             config_json=json.dumps({'aispgradio': {'command': '3d_infer'}}),
@@ -134,7 +150,7 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
         logging.info("Returning response from Process")
         return response
 
-def run_codigo(request,model,device):
+def run_codigo(request, model, device):
 
     received_images = []
     for image_bytes in unwrap_value(request.data["images"]):
@@ -153,11 +169,14 @@ def run_codigo(request,model,device):
 
     query_points = None
 
-    # bfloat16 is supported on Ampere+
-    dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
-
-    with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
-        predictions = model(images, query_points=query_points)
+    use_cuda = device.startswith("cuda")
+    if use_cuda:
+        dtype = torch.bfloat16 if torch.cuda.get_device_capability(device)[0] >= 8 else torch.float16
+        with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
+            predictions = model(images, query_points=query_points)
+    else:
+        with torch.no_grad():
+            predictions = model(images, query_points=query_points)
 
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
     predictions["extrinsic"] = extrinsic.squeeze() # TODO: ADD THIS TO THE PROTO
@@ -172,10 +191,8 @@ def run_codigo(request,model,device):
 
     #extract conf threshold from request
     json_config = json.loads(request.config_json)
-    if json_config["aispgradio"]["parameters"] and "conf_threshold" in json_config["aispgradio"]["parameters"]:
-        conf_thres = json_config["aispgradio"]["parameters"]["conf_threshold"]
-    else:
-        conf_thres = 30  # default value
+    params = json_config.get("aispgradio", {}).get("parameters", {}) or {}
+    conf_thres = params.get("conf_threshold", 30)
     logging.info(f"Using confidence threshold: {conf_thres}")
 
     # create a file like object to export the glb file
