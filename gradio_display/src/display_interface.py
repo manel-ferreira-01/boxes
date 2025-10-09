@@ -178,7 +178,8 @@ class GradioDisplay:
             {
                 "gradio": [img, label],
                 "command": "3d_infer",
-                "parameters": {"conf_threshold": conf_threshold},
+                "parameters": {"conf_threshold": conf_threshold, 
+                               "device":"cpu"},
             },
         )
         logging.info(f"written in:{self._get_files('vggt')}")

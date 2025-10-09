@@ -114,15 +114,18 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
                     if "empty" in config_json[entry].keys():
                         return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
                     elif "command" in config_json[entry]:
-                        # Handle optional device parameter
-                        parameters = config_json[entry].get("parameters", {}) or {}
-                        requested_device = parameters.get("device")
-                        if requested_device:
-                            new_dev = self.set_device(requested_device)
-                            logging.info(f"Using device for inference: {new_dev}")
                         if "3d_infer" in config_json[entry]["command"]:
+
+                            # Handle optional device parameter
+                            parameters = config_json[entry].get("parameters", {}) or {}
+                            requested_device = parameters.get("device")
+                            if requested_device:
+                                    new_dev = self.set_device(requested_device)
+
+                            logging.info(f"Using device for inference: {new_dev}")
                             logging.info("3D inference request received")
                             results, glb_file = run_codigo(request, self._model, self._device)
+                            
                         else:
                             return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
         else:
