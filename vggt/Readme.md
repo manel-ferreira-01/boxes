@@ -182,6 +182,20 @@ Successful `Process` calls return an `Envelope` whose `config_json` echoes the c
 
 The tensors are serialized using `torch.save`. Use `torch.load(io.BytesIO(...))` to recover them on the client side. `glb_file` is ready to store on disk or stream to a viewer.
 
+```python
+import io
+import torch
+from protos import pipeline_pb2, pipeline_pb2_grpc, aux
+
+# assume `response` is a pipeline_pb2.Envelope returned by PipelineService.Process
+world_points = torch.load(io.BytesIO(aux.unwrap_value(response.data["world_points"])))
+depth = torch.load(io.BytesIO(aux.unwrap_value(response.data["depth"])))
+extrinsic = torch.load(io.BytesIO(aux.unwrap_value(response.data["extrinsic"])))
+
+with open("scene.glb", "wb") as f:
+    f.write(aux.unwrap_value(response.data["glb_file"]))
+```
+
 ---
 
 ## Docker Workflow
