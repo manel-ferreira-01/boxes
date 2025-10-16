@@ -74,8 +74,8 @@ class CLIPService(clip_pb2_grpc.CLIPServiceServicer):
             # If idle watchdog moved it back to CPU, restore to GPU
             if self._device == "cpu" and torch.cuda.is_available():
                 logging.info("Request received: moving model to GPU")
-                self._model.to("cuda")
-                self._device = "cuda"
+                self._model.to("cpu")
+                self._device = "cpu"
 
         # Run inference
         image_features, text_features, logits_per_image = run_codigo(request, self._model, self._device, self._preprocess)

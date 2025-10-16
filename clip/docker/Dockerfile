@@ -37,7 +37,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. ${SERVIC
 # -----------------------------
 
 #FROM python:slim-buster
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 
+FROM nvidia/cuda:12.2.2-base-ubuntu22.04 
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME

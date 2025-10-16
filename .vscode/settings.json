@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
-        "./protos"
+        "./protos",
+        "./lang_segm/src/lang-segment-anything"
     ]
 }

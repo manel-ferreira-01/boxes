@@ -1,0 +1,13 @@
+:80 {
+    # Interface frontend
+    reverse_proxy /interface/* interface:7860
+
+    # VGGT gRPC service
+    reverse_proxy /vggt/* vggtgrpc:8061
+
+    # YOLO gRPC service
+    reverse_proxy /yolo/* yologrpc:8062
+
+    # Maestro
+    reverse_proxy /maestro/* maestro:8080
+}

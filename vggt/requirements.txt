@@ -14,3 +14,4 @@ trimesh
 gradio
 matplotlib
 opencv-python
+onnxruntime

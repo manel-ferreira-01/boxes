@@ -131,6 +131,8 @@ class GradioDisplay:
                     with gr.Column():
                         self.vggt_threeD_viewer = gr.Model3D()
                         self.vggt_conf_threshold = gr.Slider(0, 50, value=20, step=1, label="Confidence Threshold")
+                        self.vggt_mask_sky = gr.Checkbox(label="Mask Sky", value=False, visible=False)
+                        self.vggt_out_matfile = gr.File(label="Output .mat file")
 
             #callbacks
             # Hook up callbacks
@@ -161,14 +163,16 @@ class GradioDisplay:
                     self.vggt_image_input_gallery,
                     self.vggt_label_input_gallery,
                     self.vggt_conf_threshold,
+                    self.vggt_mask_sky,
                 ],
-                outputs=[self.vggt_threeD_viewer],
+                outputs=[self.vggt_threeD_viewer,
+                         self.vggt_out_matfile],
             )
 
         demo.queue(max_size=1)
         return demo
 
-    def _update_vggt(self, img, label, conf_threshold, request: gr.Request):
+    def _update_vggt(self, img, label, conf_threshold, mask_sky: bool, request: gr.Request):
         if img is None:
             return None
         logging.info("3D reconstruction request received")
@@ -179,7 +183,8 @@ class GradioDisplay:
                 "gradio": [img, label],
                 "command": "3d_infer",
                 "parameters": {"conf_threshold": conf_threshold, 
-                               "device":"cpu"},
+                               "device":"cpu",
+                               "mask_sky": mask_sky},
             },
         )
         logging.info(f"written in:{self._get_files('vggt')}")
@@ -190,7 +195,14 @@ class GradioDisplay:
             )
             with open(glb_file_path, "wb") as f:
                 f.write(ret_data[0])
-            return glb_file_path
+
+            mat_file_path = os.path.join(
+                self.tmp_data_folder, f"vggt_{request.session_hash}.mat"
+            )
+            with open(mat_file_path, "wb") as f:
+                f.write(ret_data[1].read())  # .mat file bytes
+
+            return glb_file_path, mat_file_path
 
         return self._wait_for_response("vggt", transform_fn=transform)
  
