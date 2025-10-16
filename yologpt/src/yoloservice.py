@@ -120,10 +120,14 @@ def DetectSequence(model, images, yolo_config ):
         # Run YOLO inference
         results = model(img)
         # Annotate result
-        annotated_frame = cv2.cvtColor(
-            results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),
-            cv2.COLOR_RGB2BGR
-        )
+
+        #annotated_frame = cv2.cvtColor(
+        #    results[0].plot(img=np.ascontiguousarray(results[0].orig_img)),
+        #    cv2.COLOR_RGB2BGR
+        #)
+
+        annotated_frame = results[0].plot(img=np.ascontiguousarray(results[0].orig_img))
+        
         _, labeled_image_bytes = cv2.imencode('.jpg', annotated_frame)
         annotated_images.append(labeled_image_bytes.tobytes())
         names = model.names

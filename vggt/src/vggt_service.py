@@ -182,13 +182,12 @@ def run_codigo(request, model, device):
             predictions = model(images, query_points=query_points)
 
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
-    predictions["extrinsic"] = extrinsic.squeeze() # TODO: ADD THIS TO THE PROTO
+    predictions["extrinsic"] = extrinsic.squeeze()
     predictions["intrinsic"] = intrinsic.squeeze()
 
     # Drop unnecessary intermediate outputs
     predictions.pop("pose_enc_list", None)
     predictions = {k: v.cpu() for k, v in predictions.items()}
-
     #add images to output
     predictions["images"] = images.cpu().numpy()
 
@@ -196,10 +195,16 @@ def run_codigo(request, model, device):
     json_config = json.loads(request.config_json)
     params = json_config.get("aispgradio", {}).get("parameters", {}) or {}
     conf_thres = params.get("conf_threshold", 30)
+    mask_sky = params.get("mask_sky", False)
     logging.info(f"Using confidence threshold: {conf_thres}")
+    logging.info(f"Using mask sky: {mask_sky}")
 
     # create a file like object to export the glb file
-    glb_scene = predictions_to_glb(predictions, conf_thres=conf_thres)
+    glb_scene = predictions_to_glb(predictions, 
+                                   conf_thres=conf_thres,
+                                    #mask_sky=mask_sky,
+                                    target_dir="/tmp")
+    
     b = glb_scene.export(file_type="glb")
 
     # Move everything to CPU for serialization

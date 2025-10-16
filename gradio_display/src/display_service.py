@@ -18,11 +18,22 @@ import pipeline_pb2 as display_pb2
 import pipeline_pb2_grpc as display_pb2_grpc
 from aux import wrap_value, unwrap_value
 
+import torch
+from scipy.io import loadmat,savemat
+import io
+
+
+def bytes_to_tensor(b: bytes) -> torch.Tensor:
+    return torch.load(io.BytesIO(b))
+
+
 lock = threading.Lock()
 # --- Configuration ---
 
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
+
+
 
 class DisplayService(display_pb2_grpc.DisplayServiceServicer):
     def __init__(self, gradio_display: GradioDisplay):
@@ -135,10 +146,10 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                 return display_pb2.Envelope()
         return display_pb2.Envelope()
 
-    def display_vggt(self, request, context):
+    def display_vggt(self, response, context):
         """Handles VGGT display (3D reconstruction)."""
-        #logging.info("DISPLAY : VGGT request")
-        config_json = json.loads(request.config_json)
+        #logging.info("DISPLAY : VGGT response")
+        config_json = json.loads(response.config_json)
         time.sleep(0.01)  # slight delay to ensure file is written
 
         if "aispgradio" in config_json.keys():
@@ -146,8 +157,24 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
                 #logging.error("No aispgradio entry in config_json, returning empty response")
                 return display_pb2.Envelope()
             elif config_json["aispgradio"]["command"] in ("3d_infer", ):
-                glb_file = unwrap_value(request.data["glb_file"]) or None
-                self._write_response("vggt", [glb_file, request.config_json])
+                glb_file = unwrap_value(response.data["glb_file"]) or None
+                # also create a matlab file 
+                depthmap = bytes_to_tensor(unwrap_value(response.data["depth"]))
+                ims_tensor = bytes_to_tensor(unwrap_value(response.data["images"]))
+                world_points = bytes_to_tensor(unwrap_value(response.data["world_points"])).numpy().squeeze()
+
+                mat_buf = io.BytesIO()
+                savemat(
+                    mat_buf,
+                    {
+                        "depthmap": depthmap.numpy().squeeze(),
+                        "images": ims_tensor.numpy().squeeze(),
+                        "wrld_points": world_points,
+                    },
+                )
+                mat_buf.seek(0)
+                
+                self._write_response("vggt", [glb_file, mat_buf, response.config_json])
             else:
                 #logging.error(f"Unknown command {config_json['aispgradio']['command']}, returning empty response")
                 return display_pb2.Envelope()
