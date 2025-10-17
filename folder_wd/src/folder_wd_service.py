@@ -126,7 +126,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         frame_bytes = self.video_frames[self.frame_index]
         
         annotations = {
-            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5},
+            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 20},
             "frame_index": self.frame_index,
             "video_name": self.active_video,
             "timestamp": datetime.datetime.now().isoformat(),
@@ -160,7 +160,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             images.append(buf.tobytes())
 
         annotations = {
-            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5},
+            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 20},
             "timestamp": datetime.datetime.now().isoformat(),
             "input_count": len(images),
         }
@@ -203,6 +203,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
 
             changed = out_json.get("changed", None)
             ssim_val = out_json.get("ssim", None)
+            metric = out_json.get("metric", None)
 
             # --- Validate we got a usable response ---
             if changed is None:
@@ -210,10 +211,10 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 return folder_wd_pb2.Empty()
 
             # --- Log SSIM and decision ---
-            if changed:
-                logging.info(f"Frame {self.frame_index}: CHANGE detected (SSIM={ssim_val:.3f}). Saving frame.")
-            else:
-                logging.info(f"Frame {self.frame_index}: No change (SSIM={ssim_val:.3f}). Skipping save.")
+            #if changed:
+            #    logging.info(f"Frame {self.frame_index}: CHANGE detected (SSIM={ssim_val:.3f}). Saving frame.")
+            #else:
+            #    logging.info(f"Frame {self.frame_index}: No change (SSIM={ssim_val:.3f}). Skipping save.")
 
             # --- Save frame only if change detected ---
             if changed:
@@ -223,6 +224,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     out_path = os.path.join(self.output_folder, f"processed_{self.frame_index:05d}.jpg")
                     cv2.imwrite(out_path, img)
+                    logging.info(f"metric: {metric}")
                     logging.info(f"Saved frame at: {out_path}")
 
             # --- Advance to next frame regardless of change decision ---
@@ -233,6 +235,21 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         except Exception as e:
             logging.error(f"Display error: {e}")
 
+        return folder_wd_pb2.Empty()
+
+    def dislay_langsam(self, response, context):
+        try:
+            
+            in_json = json.loads(response.config_json)
+            if in_json["aispgradio"]["status"] == "ok":
+                logging.info("got an image")
+                if self.video_mode:
+                    self.frame_index += 1
+                    self._prepare_next_frame()
+
+        except Exception as e:
+            pass
+        
         return folder_wd_pb2.Empty()
     
     def display_opencv(self, response, context):

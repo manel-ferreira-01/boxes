@@ -1,38 +1,66 @@
 kind: pipeline
 spec:
-  name: folder_wd_test
+  name: architecture_pipeline
 ---
 kind: stage
 spec:
   name: opencvgrpc
   method: similarity_check
   address: opencvgrpc:8061
-  pipeline: folder_wd_test
+  pipeline: architecture_pipeline
 ---
 kind: stage
 spec: 
   name: display
-  method: display
+  method: dislay_langsam
   address: folder_wdgrpc:8061
-  pipeline: folder_wd_test
+  pipeline: architecture_pipeline
 ---
 kind: stage
 spec:
   name: acquire
   method: acquire
   address: folder_wdgrpc:8061
-  pipeline: folder_wd_test
+  pipeline: architecture_pipeline
+---
+kind: stage
+spec:
+  name: lang_sam
+  method: Process
+  address: lang_samgrpc:8061
+  pipeline: architecture_pipeline
+---
+kind: stage
+spec:
+  name: yolo
+  method: TrackSequence
+  address: yologrpc:8061
+  pipeline: architecture_pipeline
 ---
 kind: link
 spec:
   name: acquire-opencv
   source_stage: acquire
   target_stage: opencvgrpc
-  pipeline: folder_wd_test
+  pipeline: architecture_pipeline
 ---
 kind: link
 spec:
-  name: opencv-display
+  name: opencv-yolo
   source_stage: opencvgrpc
+  target_stage: yolo
+  pipeline: architecture_pipeline
+---
+kind: link
+spec:
+  name: opencv-lang_sam
+  source_stage: opencvgrpc
+  target_stage: lang_sam
+  pipeline: architecture_pipeline
+---
+kind: link
+spec:
+  name: lang_sam-display
+  source_stage: lang_sam
   target_stage: display
-  pipeline: folder_wd_test
+  pipeline: architecture_pipeline

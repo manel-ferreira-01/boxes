@@ -81,37 +81,46 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                 logging.exception(f"Failed to move model to {target}: {e}")
             return self._device
 
-    def Process(self,request, context):
-        if request.config_json:
-            config_json = json.loads(request.config_json)
-            for entry in config_json:
-                if entry == "aispgradio":
-                    if "empty" in config_json[entry].keys():
-                        return lang_sam_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
-                    elif "command" in config_json[entry]:
-                        if "lang_sam" in config_json[entry]["command"]:
+    def Process(self, request, context):
+        """Perform text-guided segmentation on image(s)."""
+        try:
+            # --- Validate request ---
+            if not request.config_json:
+                raise ValueError("Missing config_json in request")
 
-                            # Handle optional device parameter
-                            parameters = config_json[entry].get("parameters", {}) or {}
-                            requested_device = parameters.get("device")
-                            if requested_device:
-                                new_dev = self.set_device(requested_device)
+            try:
+                config = json.loads(request.config_json)
+            except json.JSONDecodeError:
+                raise ValueError("config_json is not valid JSON")
 
-                            results = self.infer_lang_sam(request)
-                        else:
-                            return lang_sam_pb2.Envelope(
-                                config_json=json.dumps({'aispgradio': {'error': 'unknown command'}}))
-        else:
+
+            params = config.get("parameters", {}) or {}
+            requested_device = params.get("device", None)
+            if requested_device:
+                self.set_device(requested_device)
+
+            # --- Extract image(s) ---º
+            img_list = unwrap_value(request.data.get("images", []))
+            print(img_list)
+            if not img_list:
+                raise ValueError("No images provided in request.data['images']")
+            
+            
+            # --- Run inference ---
+            results = self.infer_lang_sam(img_list, config)
+
+            # --- Build response ---
             return lang_sam_pb2.Envelope(
-                config_json=json.dumps({'aispgradio': {'error': 'no config_json provided'}}))
+                data={"results": wrap_value(pickle.dumps(results))},
+                config_json=json.dumps({"aispgradio": {"status": "ok"}})
+            )
 
+        except Exception as e:
+            #logging.error(f"[InferLangSAM] {e}")
+            return lang_sam_pb2.Envelope(
+                config_json=json.dumps({"aispgradio": {"error": str(e)}})
+            )
 
-        response = lang_sam_pb2.Envelope(
-            data={"results": wrap_value(pickle.dumps(results))},
-            config_json=json.dumps({'aispgradio': {'status': 'ok'}})
-        )
-
-        return response
 
 
     def infer_lang_sam(self, request):
@@ -132,9 +141,6 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             out_list.append(output[0])
 
         return out_list
-
-
-
 
 
 # ----------------------------------------

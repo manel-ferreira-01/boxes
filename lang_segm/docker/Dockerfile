@@ -97,7 +97,4 @@ ENV HF_HUB_CACHE=${WORKSPACE}/.cache
 #print the torchhub cache path
 RUN echo "Torch hub cache path: $TORCH_HOME"
 
-
-
-
 CMD ["python3", "service.py"]
