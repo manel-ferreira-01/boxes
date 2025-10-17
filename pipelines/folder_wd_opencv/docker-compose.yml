@@ -13,6 +13,20 @@ services:
     image: sipgisr/opencvgrpc
     networks:
       - mynet
+
+  lang_samgrpc:
+    image: sipgisr/lang_samgrpc
+    volumes:
+      - ../../lang_segm/:/workspace:rw
+    entrypoint: ["python3", "/workspace/src/lang_sam_service.py"]
+    user: "root"
+    networks:
+      - mynet
+
+  yologrpc:
+    image: sipgisr/yologrpc
+    networks:
+      - mynet
       
   maestro:
     image: sipgisr/maestro:v1-latest

@@ -50,6 +50,9 @@ def pad_and_stack(arrays, pad_value=0.0):
 class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
     def __init__(self):
         self.prev_frame = None
+        self.prev_points = None
+        self.frame_counter = 0
+
 
     def Process(self, request, context):
         """Process request: extract features and optionally match."""
@@ -169,50 +172,141 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         try:
             parameters = json.loads(request.config_json)["opencv"]["parameters"]
         except Exception:
-            logging.warning("Invalid or missing parameters in config_json. Using defaults.")
+            #logging.warning("Invalid or missing parameters in config_json. Using defaults.")
             parameters = {}
 
-        self.ssim_thresh = parameters.get("ssim_thresh", 0.90)
+        # --- Common parameters ---
         self.blur_kernel = parameters.get("blur_kernel", 5)
+
+        # --- SSIM params ---
+        self.ssim_thresh = parameters.get("ssim_thresh", 0.90)
+
+        # --- Lucas–Kanade params ---
+        self.motion_thresh = parameters.get("motion_thresh", 1.5)  # px displacement
+        self.max_corners = parameters.get("max_corners", 200)
+        self.quality_level = parameters.get("quality_level", 0.01)
+        self.min_distance = parameters.get("min_distance", 5)
+        self.block_size = parameters.get("block_size", 7)
 
         # --- decode image ---
         try:
-            image_bytes = unwrap_value(request.data.get("images", []))[-1]
-            nparr = np.frombuffer(image_bytes, np.uint8)
+            # Unwrap bytes list safely (some services send [[]], some [b'...'])
+            img_list = unwrap_value(request.data.get("images", []))
+            if not img_list:
+                raise ValueError("Empty image list received.")
+            image_bytes = img_list[-1]
+
+            # Ensure it's a numpy uint8 buffer
+            nparr = np.frombuffer(image_bytes, dtype=np.uint8)
+
+            # Try decoding using OpenCV first
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception:
+
+            # Fallback: handle 4-channel PNGs or decoding errors
+            if img is None:
+                # Sometimes OpenCV fails with 4-channel PNG (transparency)
+                logging.warning("cv2.imdecode failed, trying PIL fallback...")
+                from PIL import Image
+                import io
+                img_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+            if img is None:
+                raise ValueError("Both OpenCV and PIL failed to decode image.")
+
+        except Exception as e:
+            #logging.error(f"Failed to decode input image ({type(e).__name__}): {e}")
             return folder_wd_pb2.Envelope(
                 config_json=json.dumps({"error": "Failed to decode input image"})
             )
             
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, (320, 240))
         gray = cv2.GaussianBlur(gray, (self.blur_kernel, self.blur_kernel), 0)
 
-        # --- Only compute SSIM once we have a previous frame ---
+        # --- First frame initialization ---
         if self.prev_frame is None:
             self.prev_frame = gray
-            # Don’t send anything back (or send changed=True to allow first save)
+            self.prev_points = cv2.goodFeaturesToTrack(
+                gray,
+                maxCorners=self.max_corners,
+                qualityLevel=self.quality_level,
+                minDistance=self.min_distance,
+                blockSize=self.block_size
+            )
             return folder_wd_pb2.Envelope(
                 config_json=json.dumps({
                     "status": "ready",
-                    "changed": True,   # optional: force process first frame
-                    "ssim": 1.0,
+                    "changed": True,
+                    "metric": 0.0,
                     "runtime": 0.0
                 }),
                 data={"images": wrap_value([image_bytes])}
             )
 
-        # --- Compute similarity ---
-        score = ssim(gray, self.prev_frame)
-        changed = score < self.ssim_thresh
-        self.prev_frame = gray
+        # =================================================================
+        # --- TOGGLE: choose algorithm here ---
+        # =================================================================
+        if 0:  # <-- flip to 1 to use SSIM instead of Lucas–Kanade
+            # === SSIM SIMILARITY CHECK ===
+            try:
+                score = ssim(gray, self.prev_frame)
+                changed = score < self.ssim_thresh
+                metric_val = float(score)
+                metric_name = "ssim"
+            except Exception as e:
+                logging.error(f"SSIM computation failed: {e}")
+                changed, metric_val, metric_name = False, 0.0, "ssim_error"
 
+        else:
+            # === LUCAS–KANADE MOTION DETECTION ===
+            try:
+                next_points, status, _ = cv2.calcOpticalFlowPyrLK(
+                    self.prev_frame, gray, self.prev_points, None,
+                    winSize=(15, 15), maxLevel=2,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
+                )
+
+                good_new = next_points[status == 1] if next_points is not None else np.zeros((0, 2))
+                good_old = self.prev_points[status == 1] if self.prev_points is not None else np.zeros((0, 2))
+
+                if len(good_new) == 0:
+                    mean_motion = 0.0
+                else:
+                    motion_vectors = good_new - good_old
+                    displacements = np.linalg.norm(motion_vectors, axis=1)
+                    mean_motion = float(np.mean(displacements))
+
+                changed = mean_motion > self.motion_thresh
+                metric_val = mean_motion
+                metric_name = "motion"
+
+                # update tracked features
+                self.prev_points = cv2.goodFeaturesToTrack(
+                    gray,
+                    maxCorners=self.max_corners,
+                    qualityLevel=self.quality_level,
+                    minDistance=self.min_distance,
+                    blockSize=self.block_size
+                )
+
+            except Exception as e:
+                logging.error(f"Optical flow computation failed: {e}")
+                changed, metric_val, metric_name = False, 0.0, "motion_error"
+
+        if changed:
+            self.prev_frame = gray
+        else:
+            # Keep comparing against the last "changed" frame
+            logging.info("No change — keeping previous reference frame.")
+
+
+        # --- Build response ---
         out_json = {
             "status": "success",
-            "ssim": float(score),
+            "metric_type": metric_name,
+            "metric": metric_val,
             "changed": bool(changed),
             "runtime": time.time() - start_time
         }
