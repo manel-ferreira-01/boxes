@@ -74,7 +74,6 @@ COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
 COPY --chown=${USER}:${GROUP} ${SRC} ${WORKSPACE}
 COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/service.py
 
-
 # Expose port 8061 according to ai4eu specifications
 EXPOSE 8061
 
@@ -87,6 +86,9 @@ WORKDIR ${WORKSPACE}
 COPY --chown=${USER}:${GROUP} ${SRC}/lang-segment-anything ${WORKSPACE}/lang-segment-anything
 RUN pip install -r ${WORKSPACE}/lang-segment-anything/requirements.txt
 
+# Change to non-privileged user
+USER ${USER}
+
 # set $TORCH_HOME for torchhub cache
 ENV TORCH_HOME=${WORKSPACE}/.cache
 ENV HF_HOME=${WORKSPACE}/.cache
@@ -95,8 +97,7 @@ ENV HF_HUB_CACHE=${WORKSPACE}/.cache
 #print the torchhub cache path
 RUN echo "Torch hub cache path: $TORCH_HOME"
 
-# Change to non-privileged user
-USER ${USER}
+
 
 
 CMD ["python3", "service.py"]

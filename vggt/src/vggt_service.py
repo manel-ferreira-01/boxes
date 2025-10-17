@@ -122,7 +122,6 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
                             if requested_device:
                                     new_dev = self.set_device(requested_device)
 
-                            logging.info(f"Using device for inference: {new_dev}")
                             logging.info("3D inference request received")
                             results, glb_file = run_codigo(request, self._model, self._device)
                             

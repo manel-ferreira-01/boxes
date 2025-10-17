@@ -7,12 +7,12 @@ import time
     
 import io
 import numpy as np
-
+import json
 import torch
 
 # add vggt to the path
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/vggt')
+sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/lang-segment-anything')
 print(sys.path)
 
 from PIL import Image
@@ -21,8 +21,8 @@ import pickle
 from importlib.machinery import SourceFileLoader
 import sys
 sys.path.append("./protos")
-import pipeline_pb2 as lang_segm_pb2
-import pipeline_pb2_grpc as lang_segm_grpc
+import pipeline_pb2 as lang_sam_pb2
+import pipeline_pb2_grpc as lang_sam_grpc
 from aux import wrap_value, unwrap_value
 
 import threading
@@ -34,12 +34,12 @@ IDLE_TIMEOUT = 60  # seconds
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/lang-segment-anything')
 from lang_sam import LangSAM
 
-class PipelineService(lang_segm_grpc.PipelineServiceServicer):
+class PipelineService(lang_sam_grpc.PipelineServiceServicer):
     def __init__(self):
         # Always load to CPU first
-        self._model = LangSAM(device="cpu")
+        self._model = LangSAM(sam_type="sam2.1_hiera_small",device="cpu")
         self._device = "cpu"
-        logging.info("Model loaded on CPU")
+        print("Model loaded on CPU")
         self._last_request_time = time.time()
         self._lock = threading.Lock()
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
@@ -82,7 +82,58 @@ class PipelineService(lang_segm_grpc.PipelineServiceServicer):
             return self._device
 
     def Process(self,request, context):
-        pass
+        if request.config_json:
+            config_json = json.loads(request.config_json)
+            for entry in config_json:
+                if entry == "aispgradio":
+                    if "empty" in config_json[entry].keys():
+                        return lang_sam_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
+                    elif "command" in config_json[entry]:
+                        if "lang_sam" in config_json[entry]["command"]:
+
+                            # Handle optional device parameter
+                            parameters = config_json[entry].get("parameters", {}) or {}
+                            requested_device = parameters.get("device")
+                            if requested_device:
+                                new_dev = self.set_device(requested_device)
+
+                            results = self.infer_lang_sam(request)
+                        else:
+                            return lang_sam_pb2.Envelope(
+                                config_json=json.dumps({'aispgradio': {'error': 'unknown command'}}))
+        else:
+            return lang_sam_pb2.Envelope(
+                config_json=json.dumps({'aispgradio': {'error': 'no config_json provided'}}))
+
+
+        response = lang_sam_pb2.Envelope(
+            data={"results": wrap_value(pickle.dumps(results))},
+            config_json=json.dumps({'aispgradio': {'status': 'ok'}})
+        )
+
+        return response
+
+
+    def infer_lang_sam(self, request):
+
+        # read the images
+        received_images = []
+        for image_bytes in unwrap_value(request.data["images"]):
+            image_stream = io.BytesIO(image_bytes)
+            img = Image.open(image_stream).convert("RGB")
+            #img_np = np.array(img)
+            received_images.append(img)
+
+        #read the text prompts
+        text_prompts = json.loads(request.config_json)["aispgradio"].get("text_prompt", [])
+        out_list = []
+        for image in received_images:
+            output = self._model.predict([image], text_prompts)
+            out_list.append(output[0])
+
+        return out_list
+
+
 
 
 
@@ -121,7 +172,7 @@ def run_server(server):
 
     """
     port = get_port()
-    if znot port:
+    if not port:
         return
 
     target = f'[::]:{port}'
@@ -144,12 +195,12 @@ if __name__ == '__main__':
     server = grpc.server(futures.ThreadPoolExecutor(),
                          options= [('grpc.max_send_message_length', -1), 
                                    ('grpc.max_receive_message_length', -1)])
-    vggt_pb2_grpc.add_PipelineServiceServicer_to_server(
+    lang_sam_grpc.add_PipelineServiceServicer_to_server(
         PipelineService(), server)
 
     # Add reflection
     service_names = (
-        vggt_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
+        lang_sam_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)
