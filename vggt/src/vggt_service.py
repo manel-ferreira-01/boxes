@@ -146,7 +146,7 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
                     "extrinsic": wrap_value(tensor_to_numpy_bytes(results["extrinsic"])),
                     "intrinsic": wrap_value(tensor_to_numpy_bytes(results["intrinsic"])),
                     "images": wrap_value(tensor_to_numpy_bytes(torch.tensor(results["images"]))),
-                    #"glb_file" : wrap_value(glb_file)
+                    "glb_file" : wrap_value(glb_file)
                     } # already bytes
             )
 
