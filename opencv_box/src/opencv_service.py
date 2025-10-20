@@ -238,7 +238,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                     "status": "ready",
                     "changed": True,
                     "metric": 0.0,
-                    "runtime": 0.0
+                    "runtime": 0.0,
+                    "parameters": {"device": "cuda:0"}
                 }),
                 data={"images": wrap_value([image_bytes])}
             )

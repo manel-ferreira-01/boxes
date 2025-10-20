@@ -27,6 +27,15 @@ import cv2
 import datetime
 import numpy as np
 import zstandard as zstd
+import io
+import traceback
+
+def numpy_bytes_to_data(b: bytes) -> np.ndarray:
+    buf = io.BytesIO(b)
+    arr = np.load(buf, allow_pickle=False)
+    return arr
+
+
 
 class FileHandler(FileSystemEventHandler):
     """Watches the input folder for new image or video files."""
@@ -73,6 +82,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         self.frame_index = 0
         self.active_video = None
         self.video_mode = False
+        self.processed_frames = set()
+        self.vggt_envelope = None
 
         # --- watchdog setup ---
         event_handler = FileHandler(lambda path: self._schedule_process(path))
@@ -121,23 +132,36 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         logging.info(f"Loaded {len(frames)} frames from {video_path}")
 
     def _prepare_next_frame(self):
+
         """Prepare the next frame as an envelope."""
         if self.frame_index >= len(self.video_frames):
             logging.info("All video frames processed.")
             self.last_envelope = None
             self.video_mode = False
+
+            # Select processed frames properly
+            processed_list = sorted(self.processed_frames)
+            processed_frames = [self.video_frames[i] for i in processed_list]
+
+            with self.lock:
+                self.vggt_envelope = folder_wd_pb2.Envelope(
+                    data={"images": wrap_value(processed_frames)},
+                    config_json=json.dumps({"parameters": {"device": "cuda:0"}})
+                )
+
+            logging.info("Prepared vggt_envelope with processed frames.")
             return
 
         self.frame_bytes = self.video_frames[self.frame_index]
         
         annotations = {
-            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 20},
+            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 50},
             "frame_index": self.frame_index,
             "video_name": self.active_video,
             "timestamp": datetime.datetime.now().isoformat(),
         }
 
-        logging.info(f"Prepared frame {self.frame_index} of video {self.active_video}")
+        #logging.info(f"Prepared frame {self.frame_index} of video {self.active_video}")
         self.last_envelope = folder_wd_pb2.Envelope(
             config_json=json.dumps({"opencv": annotations}),
             data={"images": wrap_value([self.frame_bytes])},
@@ -165,7 +189,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             images.append(buf.tobytes())
 
         annotations = {
-            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 20},
+            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 40},
             "timestamp": datetime.datetime.now().isoformat(),
             "input_count": len(images),
         }
@@ -187,13 +211,27 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         time.sleep(0.05)
         with self.lock:
             env = self.last_envelope
-
         if env:
             # consume the envelope once (optional: clear it)
             with self.lock:
                 self.last_envelope = None
             return env
         else:
+            return folder_wd_pb2.Envelope()
+    
+    def acquire_vggt(self, request, context):
+        #logging.info("acquire_vggt called")
+        with self.lock:
+            env = self.vggt_envelope
+        if env:
+            logging.info("Returning vggt_envelope")
+            # consume the envelope once (optional: clear it)
+            with self.lock:
+                self.vggt_envelope = None
+                logging.info("vggt_envelope consumed")
+            return env
+        else:
+            #logging.info("No vggt_envelope to return")
             return folder_wd_pb2.Envelope()
 
     def display(self, response, context):
@@ -284,6 +322,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                         os.makedirs(os.path.dirname(out_path_orig), exist_ok=True) # just to check
                         cv2.imwrite(out_path_orig, img)
+                        # save the frame idx used
+                        self.processed_frames.add(self.frame_index)
 
                         # save the json from the detections
                         out_path_json = os.path.join(self.output_folder, f"yolo_json/detections_{self.frame_index:05d}.json")
@@ -296,7 +336,39 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 return folder_wd_pb2.Empty()
             except Exception as e:
                 return folder_wd_pb2.Empty()
+    
+    def display_vggt(self, response, context):
+        if not response.config_json:
+            return folder_wd_pb2.Empty()
+        else:
+            try:
+                out_json = json.loads(response.config_json)
+                if out_json.get("VGGT"):
+                    if response.data.get("world_points", []):
+                        logging.info("got results from VGGT")
 
+                        out_dict = {}
+                        out_dict["wrld_points"] = numpy_bytes_to_data(unwrap_value(response.data["world_points"]))
+                        out_dict["world_points_conf"] = numpy_bytes_to_data(unwrap_value(response.data["world_points_conf"]))
+                        out_dict["depth"] = numpy_bytes_to_data(unwrap_value(response.data["depth"]))
+                        out_dict["depth_conf"] = numpy_bytes_to_data(unwrap_value(response.data["depth_conf"]))
+                        out_dict["images"] = numpy_bytes_to_data(unwrap_value(response.data["images"]))
+
+                        pickle_data = pickle.dumps(out_dict)
+                        out_path = os.path.join(self.output_folder, f"vggt/{self.frame_index:05d}.pkl")
+                        os.makedirs(os.path.dirname(out_path), exist_ok=True) # just to check
+                        logging.info(f"Saving vggt data at: {out_path}")
+
+                        with open(out_path, "wb") as f:
+                            f.write(pickle_data)      
+
+                return folder_wd_pb2.Empty()
+            except Exception as e:
+                tb = traceback.format_exc()
+                logging.error("[folder_wd_display_vggt] Unhandled exception:\n%s", tb)
+                return folder_wd_pb2.Empty()
+            
+    
 
 
     # ------------------------------------------------------------------

@@ -32,6 +32,16 @@ services:
     image: sipgisr/yologrpc
     networks:
       - mynet
+
+  vggtgrpc:
+    image: sipgisr/vggt_newgrpc
+    networks:
+      - mynet
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
       
   maestro:
     image: sipgisr/maestro:v1-latest

@@ -44,6 +44,27 @@ spec:
   address: folder_wdgrpc:8061
   pipeline: architecture_pipeline
 ---
+kind: stage
+spec:
+  name: display_vggt
+  method: display_vggt
+  address: folder_wdgrpc:8061
+  pipeline: architecture_pipeline
+---
+kind: stage
+spec:
+  name: acquire_vggt
+  method: acquire_vggt
+  address: folder_wdgrpc:8061
+  pipeline: architecture_pipeline
+---
+kind: stage
+spec:
+  name: vggtgrpc
+  method: Process
+  address: vggtgrpc:8061
+  pipeline: architecture_pipeline
+---
 kind: link
 spec:
   name: acquire-opencv
@@ -64,7 +85,13 @@ spec:
   source_stage: opencvgrpc
   target_stage: lang_sam
   pipeline: architecture_pipeline
-  num_empty_messages: 2
+---
+kind: link
+spec:
+  name: acquire_vggt-vggt
+  source_stage: acquire_vggt
+  target_stage: vggtgrpc
+  pipeline: architecture_pipeline
 ---
 kind: link
 spec:
@@ -78,4 +105,11 @@ spec:
   name: yolo-display
   source_stage: yolo
   target_stage: display_yolo
+  pipeline: architecture_pipeline
+---
+kind: link
+spec:
+  name: vggt-display
+  source_stage: vggtgrpc
+  target_stage: display_vggt
   pipeline: architecture_pipeline

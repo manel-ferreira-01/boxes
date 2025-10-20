@@ -31,8 +31,13 @@ message Empty {}
 
 // Universal service interface
 service PipelineService {
+  
   rpc acquire(Empty) returns (Envelope);
+  rpc acquire_vggt(Empty) returns (Envelope);
+
   rpc display(Envelope) returns (Empty);
+
   rpc display_langsam(Envelope) returns (Empty);
   rpc display_yolo(Envelope) returns (Empty);
+  rpc display_vggt(Envelope) returns (Empty);
 }
