@@ -34,15 +34,16 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 import os
 from torchvision import transforms as TF
 from utils.preprocess import preprocess_images_batch
+import traceback
 
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 IDLE_TIMEOUT = 60  # seconds
 
-def tensor_to_bytes(t: torch.Tensor) -> bytes:
+def tensor_to_numpy_bytes(t: torch.Tensor) -> bytes:
     buf = io.BytesIO()
-    torch.save(t.cpu(), buf)
+    np.save(buf, t.detach().cpu().numpy(), allow_pickle=False)
     return buf.getvalue()
 
 import threading
@@ -105,52 +106,67 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
 
     def Process(self, request, context):
-
+        start = time.time()
         results = {}
-        if request.config_json:
-            config_json = json.loads(request.config_json)
-            for entry in config_json:
-                if entry == "aispgradio":
-                    if "empty" in config_json[entry].keys():
-                        return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
-                    elif "command" in config_json[entry]:
-                        if "3d_infer" in config_json[entry]["command"]:
+        try:
+            if not request.config_json:
+                return vggt_pb2.Envelope()
+            try:
+                config = json.loads(request.config_json)
+            except json.JSONDecodeError:
+                logging.error("config_json is not valid JSON")
 
-                            # Handle optional device parameter
-                            parameters = config_json[entry].get("parameters", {}) or {}
-                            requested_device = parameters.get("device")
-                            if requested_device:
-                                    new_dev = self.set_device(requested_device)
+            params = config.get("parameters", {}) or {}
+            requested_device = params.get("device", None)
 
-                            logging.info("3D inference request received")
-                            results, glb_file = run_codigo(request, self._model, self._device)
-                            
-                        else:
-                            return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
-        else:
-            return vggt_pb2.Envelope(config_json=json.dumps({'aispgradio': {'empty': 'empty'}}))
+            if requested_device:
+                new_dev = self.set_device(requested_device)
+
+            if not request.data.get("images", []):
+                return vggt_pb2.Envelope(config_json=request.config_json)
+            else:
+                # --- Extract image(s) ---º
+                img_list = unwrap_value(request.data.get("images", []))
+                if not img_list:
+                    logging.error("No images provided in request.data['images']")
+                    return vggt_pb2.Envelope()
+            
+            # --- Run inference ---
+            results, glb_file = run_codigo(request, self._model, self._device)
+
+            import zlib
+            response = vggt_pb2.Envelope(
+                config_json=json.dumps({'VGGT': {'status': 'done',
+                                                'runtime': time.time() - start}}),
+
+                data={"world_points": wrap_value(tensor_to_numpy_bytes(results["world_points"])),
+                    "world_points_conf": wrap_value(tensor_to_numpy_bytes(results["world_points_conf"])),
+                    "depth": wrap_value(tensor_to_numpy_bytes(results["depth"])),
+                    "depth_conf": wrap_value(tensor_to_numpy_bytes(results["depth_conf"])),
+                    "extrinsic": wrap_value(tensor_to_numpy_bytes(results["extrinsic"])),
+                    "intrinsic": wrap_value(tensor_to_numpy_bytes(results["intrinsic"])),
+                    "images": wrap_value(tensor_to_numpy_bytes(torch.tensor(results["images"]))),
+                    #"glb_file" : wrap_value(glb_file)
+                    } # already bytes
+            )
+
+            if 'glb_file' in response.data:
+                glb_size = len(unwrap_value(response.data['glb_file']))
+                logging.info(f"Size of glb_file: {glb_size / (1024 * 1024):.2f} MB")
+                logging.info(f"Size of glb_file (compressed): {len(zlib.compress(unwrap_value(response.data['glb_file'])))/(1024*1024):.2f} MB")
+
+            # size of the whole message
+            total_size = sum(len(unwrap_value(v)) for v in response.data.values())
+            logging.info(f"Total response size: {total_size / (1024 * 1024):.2f} MB")
+
+            return response
         
-        import zlib
-        response = vggt_pb2.Envelope(
-            config_json=json.dumps({'aispgradio': {'command': '3d_infer'}}),
-            data={"world_points": wrap_value(tensor_to_bytes(results["world_points"])),
-                "world_points_conf": wrap_value(tensor_to_bytes(results["world_points_conf"])),
-                "depth": wrap_value(tensor_to_bytes(results["depth"])),
-                "depth_conf": wrap_value(tensor_to_bytes(results["depth_conf"])),
-                "extrinsic": wrap_value(tensor_to_bytes(results["extrinsic"])),
-                "intrinsic": wrap_value(tensor_to_bytes(results["intrinsic"])),
-                "images": wrap_value(tensor_to_bytes(torch.tensor(results["images"]))),
-                "glb_file" : wrap_value(glb_file)} # already bytes
-        )
+        except Exception as e:
+            tb = traceback.format_exc()
+            logging.error("[VGGT] Unhandled exception:\n%s", tb)
+            return vggt_pb2.Envelope()
+                           
 
-        #print the size of glb_file in bytes
-        if 'glb_file' in response.data:
-            glb_size = len(unwrap_value(response.data['glb_file']))
-            logging.info(f"Size of glb_file: {glb_size / (1024 * 1024):.2f} MB")
-            logging.info(f"Size of glb_file (compressed): {len(zlib.compress(unwrap_value(response.data['glb_file'])))/(1024*1024):.2f} MB")
-
-        logging.info("Returning response from Process")
-        return response
 
 def run_codigo(request, model, device):
 

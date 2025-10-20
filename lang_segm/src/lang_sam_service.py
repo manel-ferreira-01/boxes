@@ -96,7 +96,7 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             if not request.config_json:
                 return lang_sam_pb2.Envelope()
 
-            logging.info(f"Received config: {request.config_json}")
+            #f"Received config: {request.config_json}")
             try:
                 config = json.loads(request.config_json)
             except json.JSONDecodeError:
@@ -110,11 +110,9 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             if requested_device:
                 self.set_device(requested_device)
             
-            # if there is an json but not images, just return the same json
+            # if there is an json but not images, just return the same json, opencv probably just recovered a frame for ssim
             if not request.data.get("images", []):
-                return lang_sam_pb2.Envelope(
-                    config_json=request.config_json
-                )
+                return lang_sam_pb2.Envelope(config_json=request.config_json)
             else:
                 # --- Extract image(s) ---º
                 img_list = unwrap_value(request.data.get("images", []))
