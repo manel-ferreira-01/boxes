@@ -9,17 +9,22 @@ services:
     volumes:
       - ../../folder_wd/test/:/data:rw
 
-  opencvgrpc:
-    image: sipgisr/opencvgrpc
-    networks:
-      - mynet
-
   lang_samgrpc:
     image: sipgisr/lang_samgrpc
     volumes:
       - ../../lang_segm/:/workspace:rw
-    entrypoint: ["python3", "/workspace/src/lang_sam_service.py"]
+    entrypoint: ["sh", "-lc", "python3 -m pip install --no-cache-dir zstandard && exec python3 /workspace/src/lang_sam_service.py"]
     user: "root"
+    networks:
+      - mynet
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+  opencvgrpc:
+    image: sipgisr/opencvgrpc
     networks:
       - mynet
 

@@ -7,3 +7,5 @@
 **/*.jpg
 **/*.mp4
 .cache/
+output/
+*.MOV

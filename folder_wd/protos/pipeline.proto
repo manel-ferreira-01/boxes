@@ -33,6 +33,6 @@ message Empty {}
 service PipelineService {
   rpc acquire(Empty) returns (Envelope);
   rpc display(Envelope) returns (Empty);
-  rpc display_opencv(Envelope) returns (Empty);
-  rpc dislay_langsam(Envelope) returns (Empty);
+  rpc display_langsam(Envelope) returns (Empty);
+  rpc display_yolo(Envelope) returns (Empty);
 }

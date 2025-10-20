@@ -60,11 +60,14 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         #start timer
         start_time = time.time()
 
+        if not request.config_json:
+            return folder_wd_pb2.Envelope()
+
         # --- parse parameters safely ---
         try:
             parameters = json.loads(request.config_json)["opencv"]["parameters"]
         except Exception:
-            logging.warning("Invalid or missing parameters in config_json. Using defaults.")
+            #logging.warning("Invalid or missing parameters in config_json. Using defaults.")
             parameters = {}
 
         feature_extractor = parameters.get("feature_extractor", "SIFT").upper()
@@ -80,13 +83,9 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 if img is not None:
                     imgs_in.append(img)
             if not imgs_in:
-                return folder_wd_pb2.Envelope(
-                    config_json=json.dumps({"error": "No valid input images"})
-                )
+                return folder_wd_pb2.Envelope()
         except Exception:
-            return folder_wd_pb2.Envelope(
-                config_json=json.dumps({"error": "Failed to decode input images"})
-            )
+            return folder_wd_pb2.Envelope()
 
         # Detector setup
         if feature_extractor == "SIFT":
@@ -94,9 +93,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         elif feature_extractor == "ORB":
             detector = cv2.ORB_create(nfeatures=max_keypoints)
         else:
-            return folder_wd_pb2.Envelope(
-                config_json=json.dumps({"error": f"Unsupported extractor {feature_extractor}"})
-            )
+            return folder_wd_pb2.Envelope()
 
         keypoints_list, descriptors_list = [], []
         for img in imgs_in:
@@ -169,6 +166,9 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
     def similarity_check(self, request, context):
         start_time = time.time()
 
+        if not request.config_json: # is not even an empty string
+            return folder_wd_pb2.Envelope()
+
         try:
             parameters = json.loads(request.config_json)["opencv"]["parameters"]
         except Exception:
@@ -215,10 +215,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 raise ValueError("Both OpenCV and PIL failed to decode image.")
 
         except Exception as e:
-            #logging.error(f"Failed to decode input image ({type(e).__name__}): {e}")
-            return folder_wd_pb2.Envelope(
-                config_json=json.dumps({"error": "Failed to decode input image"})
-            )
+            logging.error(f"Failed to decode input image ({type(e).__name__}): {e}")
+            return folder_wd_pb2.Envelope()
             
             
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -257,7 +255,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 metric_name = "ssim"
             except Exception as e:
                 logging.error(f"SSIM computation failed: {e}")
-                changed, metric_val, metric_name = False, 0.0, "ssim_error"
+                return folder_wd_pb2.Envelope()
 
         else:
             # === LUCAS–KANADE MOTION DETECTION ===
@@ -293,7 +291,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
 
             except Exception as e:
                 logging.error(f"Optical flow computation failed: {e}")
-                changed, metric_val, metric_name = False, 0.0, "motion_error"
+                return folder_wd_pb2.Envelope()
 
         if changed:
             self.prev_frame = gray
@@ -301,14 +299,15 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             # Keep comparing against the last "changed" frame
             logging.info("No change — keeping previous reference frame.")
 
-
         # --- Build response ---
         out_json = {
             "status": "success",
             "metric_type": metric_name,
             "metric": metric_val,
             "changed": bool(changed),
-            "runtime": time.time() - start_time
+            "runtime": time.time() - start_time,
+            "parameters": {"device": "cuda:0"}
+            #create a random hash to identify the frame
         }
 
         return folder_wd_pb2.Envelope(
