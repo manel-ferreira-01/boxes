@@ -5,6 +5,8 @@ import logging
 import os
 import time
 import json
+import numpy as np
+import pickle
 
 # Import proto files and auxiliary functions
 import sys
@@ -24,6 +26,7 @@ import threading
 import cv2
 import datetime
 import numpy as np
+import zstandard as zstd
 
 class FileHandler(FileSystemEventHandler):
     """Watches the input folder for new image or video files."""
@@ -110,6 +113,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             self.video_frames = frames
             self.frame_index = 0
             self.active_video = os.path.basename(video_path)
+            self.output_folder = os.path.join(self.output_folder, os.path.basename(os.path.splitext(self.active_video)[0]))
+            os.makedirs(self.output_folder, exist_ok=True)
             self.video_mode = True
             self._prepare_next_frame()
 
@@ -123,7 +128,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             self.video_mode = False
             return
 
-        frame_bytes = self.video_frames[self.frame_index]
+        self.frame_bytes = self.video_frames[self.frame_index]
         
         annotations = {
             "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 20},
@@ -135,7 +140,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         logging.info(f"Prepared frame {self.frame_index} of video {self.active_video}")
         self.last_envelope = folder_wd_pb2.Envelope(
             config_json=json.dumps({"opencv": annotations}),
-            data={"images": wrap_value([frame_bytes])},
+            data={"images": wrap_value([self.frame_bytes])},
         )
 
     # ------------------------------------------------------------------
@@ -210,12 +215,6 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 #logging.warning(f"No 'changed' flag in response: {out_json}")
                 return folder_wd_pb2.Empty()
 
-            # --- Log SSIM and decision ---
-            #if changed:
-            #    logging.info(f"Frame {self.frame_index}: CHANGE detected (SSIM={ssim_val:.3f}). Saving frame.")
-            #else:
-            #    logging.info(f"Frame {self.frame_index}: No change (SSIM={ssim_val:.3f}). Skipping save.")
-
             # --- Save frame only if change detected ---
             if changed:
                 images = unwrap_value(response.data.get("images")) if response.data else []
@@ -237,32 +236,67 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
 
         return folder_wd_pb2.Empty()
 
-    def dislay_langsam(self, response, context):
-        try:
-            
-            in_json = json.loads(response.config_json)
-            if in_json["aispgradio"]["status"] == "ok":
-                logging.info("got an image")
-                if self.video_mode:
-                    self.frame_index += 1
-                    self._prepare_next_frame()
+    def display_langsam(self, response, context):
+        if not response.config_json:
+            return folder_wd_pb2.Empty()
+        else:
+            try:
+                out_json = json.loads(response.config_json)
+                if out_json.get("status"):
+                    if response.data.get("results", []):
+                        logging.info("got results from langsam")
+                        pkl = pickle.loads(zstd.decompress(unwrap_value(response.data["results"])))
+                        # save pickle into output folder
+                        out_path = os.path.join(self.output_folder, f"lang_sam/{self.frame_index:05d}.pkl")
+                        os.makedirs(os.path.dirname(out_path), exist_ok=True) # just to check
+                        with open(out_path, "wb") as f:
+                            pickle.dump(pkl, f)
 
-        except Exception as e:
-            pass
-        
-        return folder_wd_pb2.Empty()
+                    if self.video_mode:
+                        self.frame_index += 1
+                        self._prepare_next_frame()
+
+                return folder_wd_pb2.Empty()
+            except Exception as e:
+                return folder_wd_pb2.Empty()
     
-    def display_opencv(self, response, context):
-        try:
-            
-            in_json = json.loads(response.config_json)
-            if in_json.get("changed") == True:
-                logging.info("got an image")
 
-        except Exception as e:
-            pass
-        
-        return folder_wd_pb2.Empty()
+    def display_yolo(self, response, context):
+        if not response.config_json:
+            return folder_wd_pb2.Empty()
+        else:
+            try:
+                out_json = json.loads(response.config_json)
+                if out_json.get("YOLO"):
+                    if response.data.get("images", []):
+                        logging.info("got results from yolo")
+                        images = unwrap_value(response.data["images"])
+                        for idx, img_bytes in enumerate(images): # it should only be one img
+                            nparr = np.frombuffer(img_bytes, np.uint8)
+                            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                            out_path = os.path.join(self.output_folder, f"yolo/processed_{self.frame_index:05d}.jpg")
+                            os.makedirs(os.path.dirname(out_path), exist_ok=True) # just to check
+                            cv2.imwrite(out_path, img)
+
+                        #also save self.frame_bytes
+                        out_path_orig =  os.path.join(self.output_folder, f"original/orig_{self.frame_index:05d}.jpg")
+                        nparr = np.frombuffer(self.frame_bytes, np.uint8)
+                        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        os.makedirs(os.path.dirname(out_path_orig), exist_ok=True) # just to check
+                        cv2.imwrite(out_path_orig, img)
+
+                        # save the json from the detections
+                        out_path_json = os.path.join(self.output_folder, f"yolo_json/detections_{self.frame_index:05d}.json")
+                        os.makedirs(os.path.dirname(out_path_json), exist_ok=True) # just to check
+                        with open(out_path_json, "w") as f:
+                            json.dump(out_json["YOLO"], f)
+
+                    # ONLY THE LANGSAM PREPARES THE FRAMES, SINCE IT WOULD PROBABLY TAKES MORE TIME THAN YOLO
+
+                return folder_wd_pb2.Empty()
+            except Exception as e:
+                return folder_wd_pb2.Empty()
+
 
 
     # ------------------------------------------------------------------

@@ -11,8 +11,8 @@ spec:
 ---
 kind: stage
 spec: 
-  name: display
-  method: dislay_langsam
+  name: display_langsam
+  method: display_langsam
   address: folder_wdgrpc:8061
   pipeline: architecture_pipeline
 ---
@@ -37,6 +37,13 @@ spec:
   address: yologrpc:8061
   pipeline: architecture_pipeline
 ---
+kind: stage
+spec:
+  name: display_yolo
+  method: display_yolo
+  address: folder_wdgrpc:8061
+  pipeline: architecture_pipeline
+---
 kind: link
 spec:
   name: acquire-opencv
@@ -57,10 +64,18 @@ spec:
   source_stage: opencvgrpc
   target_stage: lang_sam
   pipeline: architecture_pipeline
+  num_empty_messages: 2
 ---
 kind: link
 spec:
   name: lang_sam-display
   source_stage: lang_sam
-  target_stage: display
+  target_stage: display_langsam
+  pipeline: architecture_pipeline
+---
+kind: link
+spec:
+  name: yolo-display
+  source_stage: yolo
+  target_stage: display_yolo
   pipeline: architecture_pipeline

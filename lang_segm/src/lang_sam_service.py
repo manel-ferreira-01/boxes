@@ -9,6 +9,8 @@ import io
 import numpy as np
 import json
 import torch
+import traceback
+import zstandard as zstd
 
 # add vggt to the path
 import sys
@@ -53,9 +55,14 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                 # Move back to CPU only if currently on GPU
                 if idle_time > IDLE_TIMEOUT and self._device.startswith("cuda"):
                     logging.info("Idle timeout reached: moving model back to CPU")
-                    self._model.to("cpu")
-                    torch.cuda.empty_cache()
-                    self._device = "cpu"
+                    try:
+                        del self._model
+                        torch.cuda.empty_cache()
+                        self._model = LangSAM(sam_type="sam2.1_hiera_small", device="cpu")
+                        self._device = "cpu"
+                    except Exception as e:
+                        logging.error(f"Failed to move LangSAM back to CPU: {e}")
+
 
     def set_device(self, target: str):
         with self._lock:
@@ -69,7 +76,7 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                 return self._device
 
             try:
-                logging.info(f"Reinitializing VGGT model on {target}")
+                logging.info(f"Reinitializing model on {target}")
                 # Reinstantiate model fresh on target device
                 new_model = LangSAM(device=target)
                 # Replace old one
@@ -82,48 +89,56 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             return self._device
 
     def Process(self, request, context):
+
         """Perform text-guided segmentation on image(s)."""
         try:
             # --- Validate request ---
             if not request.config_json:
-                raise ValueError("Missing config_json in request")
+                return lang_sam_pb2.Envelope()
 
+            logging.info(f"Received config: {request.config_json}")
             try:
                 config = json.loads(request.config_json)
             except json.JSONDecodeError:
-                raise ValueError("config_json is not valid JSON")
+                logging.error("config_json is not valid JSON")
+                # it does not need to fail
 
-
+            #logging.error("config parsed")
             params = config.get("parameters", {}) or {}
             requested_device = params.get("device", None)
+
             if requested_device:
                 self.set_device(requested_device)
-
-            # --- Extract image(s) ---º
-            img_list = unwrap_value(request.data.get("images", []))
-            print(img_list)
-            if not img_list:
-                raise ValueError("No images provided in request.data['images']")
+            
+            # if there is an json but not images, just return the same json
+            if not request.data.get("images", []):
+                return lang_sam_pb2.Envelope(
+                    config_json=request.config_json
+                )
+            else:
+                # --- Extract image(s) ---º
+                img_list = unwrap_value(request.data.get("images", []))
+                if not img_list:
+                    logging.error("No images provided in request.data['images']")
+                    return lang_sam_pb2.Envelope()
             
             
             # --- Run inference ---
-            results = self.infer_lang_sam(img_list, config)
+            results = self.infer_lang_sam(request)
 
             # --- Build response ---
+            logging.info("Inference completed, preparing response")
             return lang_sam_pb2.Envelope(
-                data={"results": wrap_value(pickle.dumps(results))},
-                config_json=json.dumps({"aispgradio": {"status": "ok"}})
+                data={"results": wrap_value(zstd.compress(pickle.dumps(results)))},
+                config_json=json.dumps({"status": "ok"})
             )
-
         except Exception as e:
-            #logging.error(f"[InferLangSAM] {e}")
-            return lang_sam_pb2.Envelope(
-                config_json=json.dumps({"aispgradio": {"error": str(e)}})
-            )
+            tb = traceback.format_exc()
+            logging.error("[InferLangSAM] Unhandled exception:\n%s", tb)
+            return lang_sam_pb2.Envelope()
 
 
-
-    def infer_lang_sam(self, request):
+    def infer_lang_sam(self, request): #TODO: make it don't enter the whole request
 
         # read the images
         received_images = []
@@ -134,7 +149,8 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             received_images.append(img)
 
         #read the text prompts
-        text_prompts = json.loads(request.config_json)["aispgradio"].get("text_prompt", [])
+        #text_prompts = json.loads(request.config_json).get("text_prompt", [])
+        text_prompts = ["grass. trees. bus. building. people. car. road."]
         out_list = []
         for image in received_images:
             output = self._model.predict([image], text_prompts)
