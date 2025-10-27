@@ -70,9 +70,9 @@ class FileHandler(FileSystemEventHandler):
 class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
     def __init__(self):
         self.input_folder = os.getenv("INPUT_FOLDER", "/data")
-        self.output_folder = os.getenv("OUTPUT_FOLDER", "/data/output")
+        self.base_output_folder = os.getenv("OUTPUT_FOLDER", "/data/output")
         os.makedirs(self.input_folder, exist_ok=True)
-        os.makedirs(self.output_folder, exist_ok=True)
+        os.makedirs(self.base_output_folder, exist_ok=True)
 
         self.lock = threading.Lock()
         self.last_envelope = None
@@ -107,31 +107,46 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
     # ------------------------------------------------------------------
     # --- Video handling
     # ------------------------------------------------------------------
-    def _process_video(self, video_path):
+    def _process_video(self, video_path, max_size=(1280, 720)):
         """Extract frames and prepare first frame for processing."""
         logging.info(f"Extracting frames from video: {video_path}")
         cap = cv2.VideoCapture(video_path)
         frames = []
+        max_w, max_h = max_size
+
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+
+            # --- Resize if needed ---
+            h, w = frame.shape[:2]
+            if w > max_w or h > max_h:
+                scale = min(max_w / w, max_h / h)
+                new_size = (int(w * scale), int(h * scale))
+                frame = cv2.resize(frame, new_size, interpolation=cv2.INTER_AREA)
+
+            # --- Encode to bytes ---
             _, buf = cv2.imencode(".jpg", frame)
             frames.append(buf.tobytes())
+
         cap.release()
+
 
         with self.lock:
             self.video_frames = frames
             self.frame_index = 0
             self.active_video = os.path.basename(video_path)
-            self.output_folder = os.path.join(self.output_folder, os.path.basename(os.path.splitext(self.active_video)[0]))
+            self.output_folder = os.path.join(self.base_output_folder, os.path.basename(os.path.splitext(self.active_video)[0]))
+            #TODO: THIS BREAKS WHEN MULTIPLE VIDEOS ARE PROCESSED SIMULTANEOUSLY
+            
             os.makedirs(self.output_folder, exist_ok=True)
             self.video_mode = True
             self._prepare_next_frame()
 
         logging.info(f"Loaded {len(frames)} frames from {video_path}")
 
-    def _prepare_next_frame(self):
+    def _prepare_next_frame(self, max_size=(1280, 720)):
 
         """Prepare the next frame as an envelope."""
         if self.frame_index >= len(self.video_frames):
@@ -146,7 +161,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             with self.lock:
                 self.vggt_envelope = folder_wd_pb2.Envelope(
                     data={"images": wrap_value(processed_frames)},
-                    config_json=json.dumps({"parameters": {"device": "cuda:0"}})
+                    config_json=json.dumps({"parameters": {"device": "cuda:1"}})
                 )
 
             logging.info("Prepared vggt_envelope with processed frames.")
@@ -155,11 +170,11 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         self.frame_bytes = self.video_frames[self.frame_index]
         
         annotations = {
-            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 50},
+            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 35},
             "frame_index": self.frame_index,
             "video_name": self.active_video,
             "timestamp": datetime.datetime.now().isoformat(),
-        }
+        } #TODO: add stream field to this
 
         #logging.info(f"Prepared frame {self.frame_index} of video {self.active_video}")
         self.last_envelope = folder_wd_pb2.Envelope(
@@ -189,7 +204,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             images.append(buf.tobytes())
 
         annotations = {
-            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 40},
+            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 35},
             "timestamp": datetime.datetime.now().isoformat(),
             "input_count": len(images),
         }
@@ -270,7 +285,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                 self._prepare_next_frame()
 
         except Exception as e:
-            logging.error(f"Display error: {e}")
+            tb = traceback.format_exc()
+            logging.error("[folder_wd_display] Unhandled exception:\n%s", tb)
 
         return folder_wd_pb2.Empty()
 
@@ -296,6 +312,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
 
                 return folder_wd_pb2.Empty()
             except Exception as e:
+                tb = traceback.format_exc()
+                logging.error("[folder_wd_display_langsam] Unhandled exception:\n%s", tb)
                 return folder_wd_pb2.Empty()
     
 
@@ -335,6 +353,8 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
 
                 return folder_wd_pb2.Empty()
             except Exception as e:
+                tb = traceback.format_exc()
+                logging.error("[folder_wd_display_yolo] Unhandled exception:\n%s", tb)
                 return folder_wd_pb2.Empty()
     
     def display_vggt(self, response, context):

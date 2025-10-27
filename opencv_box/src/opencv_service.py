@@ -239,7 +239,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                     "changed": True,
                     "metric": 0.0,
                     "runtime": 0.0,
-                    "parameters": {"device": "cuda:0"}
+                    "parameters": {"device": "cuda:1"}
                 }),
                 data={"images": wrap_value([image_bytes])}
             )
@@ -307,7 +307,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             "metric": metric_val,
             "changed": bool(changed),
             "runtime": time.time() - start_time,
-            "parameters": {"device": "cuda:0"}
+            "parameters": {"device": "cuda:1"}
             #create a random hash to identify the frame
         }
 
