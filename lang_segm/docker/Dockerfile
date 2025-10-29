@@ -45,6 +45,7 @@ ARG GROUP=runner-group
 ARG SRC=src
 
 
+
 # Create non-privileged user and workspace
 RUN addgroup --system ${GROUP} && \
     adduser --system --no-create-home --ingroup ${GROUP} ${USER} && \
@@ -63,6 +64,14 @@ RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     rm requirements.txt
 
+ARG LANGSAM_REPO=https://github.com/luca-medeiros/lang-segment-anything.git
+ARG LANGSAM_DIR=${WORKSPACE}/lang-segment-anything
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone --depth 1 ${LANGSAM_REPO} ${LANGSAM_DIR} && \
+    pip install -r ${LANGSAM_DIR}/requirements.txt
+    
+
 # COPY .proto file to root to meet ai4eu specifications
 COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/pipeline.proto /
 
@@ -80,11 +89,8 @@ EXPOSE 8061
 WORKDIR ${WORKSPACE}
 
 # -----------------------------
-# Specific steps for vggt service
+# Specific steps for lang_sam service
 # -----------------------------
-
-COPY --chown=${USER}:${GROUP} ${SRC}/lang-segment-anything ${WORKSPACE}/lang-segment-anything
-RUN pip install -r ${WORKSPACE}/lang-segment-anything/requirements.txt
 
 # Change to non-privileged user
 USER ${USER}
