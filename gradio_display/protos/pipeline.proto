@@ -27,9 +27,17 @@ message Envelope {
   map<string, Value> data = 2;      
 }
 
+message Empty {};
+
 // Universal service interface
 service DisplayService {
-  rpc acquire (Envelope) returns (Envelope);
-  rpc display_yolo (Envelope) returns (Envelope);
-  rpc display_vggt (Envelope) returns (Envelope);
+
+  rpc acquire_yolo_detect(Envelope) returns (Envelope);
+  rpc acquire_yolo_track(Envelope)  returns (Envelope);
+
+  rpc display_yolo_detect(Envelope)        returns (Envelope);
+  rpc display_yolo_track(Envelope)        returns (Envelope);
+
+  rpc acquire_vggt(Envelope)        returns (Envelope);
+  rpc display_vggt(Envelope)        returns (Envelope);
 }

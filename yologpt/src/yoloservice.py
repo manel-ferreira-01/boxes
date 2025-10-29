@@ -60,11 +60,9 @@ class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
             )
 
         except Exception as e:
-            logging.error(f"[DetectSequence] {e}")
+            #logging.error(f"[DetectSequence] {e}")
             error_json = json.dumps({"YOLO_error": str(e)})
-            return yolo_pb2.Envelope(
-                config_json=error_json
-            )
+            return yolo_pb2.Envelope()
 
     def TrackSequence(self, request, context):
         """Run YOLO tracking on a sequence of images."""

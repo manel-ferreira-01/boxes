@@ -65,81 +65,148 @@ class DisplayService(display_pb2_grpc.DisplayServiceServicer):
             with open(out_file, "wb") as f:
                 pickle.dump(payload, f)
 
-    def acquire(self, request, context):
-        """Handles the acquire() loop for any algorithm request.
-        Returns 'empty' if no file is available (non-blocking)."""
-        #logging.info("DISPLAY : acquire request")
+    def acquire_yolo_detect(self, request, context):
+        """Acquire data for YOLO DetectSequence."""
+        in_file, _ = self._get_files("yolo_detect")
+        if not os.path.exists(in_file):
+            return display_pb2.Envelope()
+
+        with lock:
+            with open(in_file, "rb") as f:
+                gradio_data = pickle.load(f)
+            os.remove(in_file)
+
+        # Only forward detectsequence commands
+        if gradio_data.get("command") != "detectsequence":
+            return display_pb2.Envelope()
+
+        gg = gradio_data.get("gradio", [[], ""])
+        imgs = [pair[0] for pair in gg[0]]
+        image_bytes = [cv2.imencode(".jpg", im)[1].tobytes() for im in imgs]
+
+        self.input_count += 1
+        annotations = {
+            "command": "detectsequence",
+            "user": gg[1],
+            "input_count": self.input_count,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "parameters": gradio_data.get("parameters", {}),
+        }
+
+        return display_pb2.Envelope(
+            config_json=json.dumps({"aispgradio": annotations}),
+            data={"images": wrap_value(image_bytes)},
+        )
+    
+    def acquire_yolo_track(self, request, context):
+        """Acquire data for YOLO TrackSequence."""
+        in_file, _ = self._get_files("yolo_track")
+        if not os.path.exists(in_file):
+            return display_pb2.Envelope()
+
+        with lock:
+            with open(in_file, "rb") as f:
+                gradio_data = pickle.load(f)
+            os.remove(in_file)
+
+        if gradio_data.get("command") != "tracksequence":
+            return display_pb2.Envelope()
+
+        gg = gradio_data.get("gradio", [[], ""])
+        imgs = [pair[0] for pair in gg[0]]
+        image_bytes = [cv2.imencode(".jpg", im)[1].tobytes() for im in imgs]
+
+        self.input_count += 1
+        annotations = {
+            "command": "tracksequence",
+            "user": gg[1],
+            "input_count": self.input_count,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "stream": gradio_data.get("parameters", None).get("stream", None),
+        }
+
+        return display_pb2.Envelope(
+            config_json=json.dumps({"aispgradio": annotations}),
+            data={"images": wrap_value(image_bytes)},
+        )
+
+
+    def acquire_vggt(self, request, context):
+        """Send image(s) to VGGT stage (3D reconstruction)."""
+        in_file, _ = self._get_files("vggt")
+        if not os.path.exists(in_file):
+            return display_pb2.Envelope()
+
+        with lock:
+            with open(in_file, "rb") as f:
+                gradio_data = pickle.load(f)
+            os.remove(in_file)
+
+        gg = gradio_data.get("gradio", [[], ""])
+        imgs = [pair[0] for pair in gg[0]]
+
+        image_bytes = [cv2.imencode(".jpg", im)[1].tobytes() for im in imgs]
+
+        annotations = {
+            "command": "3d_infer",
+            "user": gg[1],
+            "timestamp": datetime.datetime.now().isoformat(),
+            "parameters": gradio_data.get("parameters", {}),
+        }
+
+        return display_pb2.Envelope(
+            config_json=json.dumps({"aispgradio": annotations}),
+            data={"images": wrap_value(image_bytes)},
+        )
+
+
+    def display_yolo_detect(self, request, context):
+        """Handles YOLO detection display."""
+        if not request.config_json:
+            return display_pb2.Envelope()
+
+        try:
+            config_json = json.loads(request.config_json)
+        except json.JSONDecodeError:
+            return display_pb2.Envelope()
+
         time.sleep(0.01)
-        for algo in self.gradio_display.file_map.keys():
-            in_file, _ = self._get_files(algo)
-            #logging.info(f"{in_file}")
-            
-            if os.path.exists(in_file):
-                logging.info(f"DISPLAY : Found data file {in_file}, processing")
-                with lock:
-                    with open(in_file, "rb") as f:
-                        gradio_data = pickle.load(f)
-                    os.remove(in_file)
+        if "YOLO" in config_json.keys():
+            images = [
+                cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
+                for img in unwrap_value(request.data.get("images", []))
+            ]
+            # Write to file for Gradio interface
+            self._write_response("yolo_detect", [images, request.config_json])
+        else:
+            logging.debug("display_yolo_detect: missing YOLO key in config_json")
 
-                # --- Encode images depending on command
-                if gradio_data["command"] in ("detectsequence", "tracksequence"):
-                    gg = gradio_data["gradio"][0]
-                    image_bytes = [
-                        cv2.imencode(".jpg", im)[1].tobytes()
-                        for im in [pair[0] for pair in gg]
-                    ]
-
-                elif gradio_data["command"] == "3d_infer":
-                    gg = gradio_data["gradio"][0]
-                    image_bytes = [
-                        cv2.imencode(".jpg", im)[1].tobytes()
-                        for im in [pair[0] for pair in gg]
-                    ]
-
-                else:
-                    logging.error("Unknown command in acquire")
-                    image_bytes = []
-
-                # --- Add metadata
-                self.input_count += 1
-                annotations = {
-                    "command": gradio_data["command"],
-                    "user": gradio_data["gradio"][1],
-                    "input_count": self.input_count,
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    "parameters": gradio_data.get("parameters", {}),
-                }
-
-                return display_pb2.Envelope(
-                    config_json=json.dumps({"aispgradio": annotations}),
-                    data={"images": wrap_value(image_bytes)},
-                )
-
-            else:
-                continue
         return display_pb2.Envelope()
 
 
-    def display_yolo(self, request, context):
-        """Handles YOLO display (detect/track)."""
-        #logging.info("DISPLAY : YOLO request")
-        config_json = json.loads(request.config_json)
-        time.sleep(0.01)  # slight delay to ensure file is written
+    def display_yolo_track(self, request, context):
+        """Handles YOLO tracking display."""
+        if not request.config_json:
+            return display_pb2.Envelope()
 
-        if "aispgradio" in config_json.keys():
-            if "empty" in config_json["aispgradio"].keys():
-                #logging.error("No aispgradio entry in config_json, returning empty response")
-                return display_pb2.Envelope()
-            elif config_json["aispgradio"]["command"] in ("detectsequence", "tracksequence"):
-                images = [
-                    cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
-                    for img in unwrap_value(request.data["images"])
-                ]
-                self._write_response("yolo", [images, request.config_json])
-            else:
-                #logging.error(f"Unknown command {config_json['aispgradio']['command']}, returning empty response")
-                return display_pb2.Envelope()
+        try:
+            config_json = json.loads(request.config_json)
+        except json.JSONDecodeError:
+            return display_pb2.Envelope()
+
+        time.sleep(0.01)
+        if "YOLO" in config_json.keys():
+            images = [
+                cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
+                for img in unwrap_value(request.data.get("images", []))
+            ]
+            # Write to file for Gradio interface
+            self._write_response("yolo_track", [images, request.config_json])
+        else:
+            logging.debug("display_yolo_track: missing YOLO key in config_json")
+
         return display_pb2.Envelope()
+
 
     def display_vggt(self, response, context):
         """Handles VGGT display (3D reconstruction)."""

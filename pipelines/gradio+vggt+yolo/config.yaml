@@ -2,6 +2,7 @@ kind: pipeline
 spec:
   name: full_gradio
 ---
+# ------------------ VGGT ------------------
 kind: stage
 spec:
   name: vggtgrpc
@@ -11,28 +12,14 @@ spec:
 ---
 kind: stage
 spec:
-  name: yologrpc
-  method: AllProcessing
-  address: yologrpc:8061
-  pipeline: full_gradio
----
-kind: stage
-spec: 
-  name: gradio-acquire
-  method: acquire
+  name: gradio_acquire_vggt
+  method: acquire_vggt
   address: interface:8061
   pipeline: full_gradio
 ---
 kind: stage
-spec: 
-  name: gradio-display_yolo
-  method: display_yolo
-  address: interface:8061
-  pipeline: full_gradio
----
-kind: stage
-spec: 
-  name: gradio-display_vggt
+spec:
+  name: gradio_display_vggt
   method: display_vggt
   address: interface:8061
   pipeline: full_gradio
@@ -40,27 +27,84 @@ spec:
 kind: link
 spec:
   name: gradio-vggt
-  source_stage: gradio-acquire
+  source_stage: gradio_acquire_vggt
   target_stage: vggtgrpc
-  pipeline: full_gradio
----
-kind: link
-spec:
-  name: gradio-yolo
-  source_stage: gradio-acquire
-  target_stage: yologrpc
-  pipeline: full_gradio
----
-kind: link
-spec:
-  name: yolo-gradio
-  source_stage: yologrpc
-  target_stage: gradio-display_yolo
   pipeline: full_gradio
 ---
 kind: link
 spec:
   name: vggt-gradio
   source_stage: vggtgrpc
-  target_stage: gradio-display_vggt
+  target_stage: gradio_display_vggt
+  pipeline: full_gradio
+---
+# ------------------ YOLO ------------------
+kind: stage
+spec:
+  name: yolo_detect
+  method: DetectSequence
+  address: yologrpc:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec:
+  name: yolo_track
+  method: TrackSequence
+  address: yologrpc:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec:
+  name: gradio_acquire_yolo_detect
+  method: acquire_yolo_detect
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec:
+  name: gradio_acquire_yolo_track
+  method: acquire_yolo_track
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec:
+  name: gradio_display_yolo_track
+  method: display_yolo_track
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: stage
+spec:
+  name: gradio_display_yolo_detect
+  method: display_yolo_detect
+  address: interface:8061
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: gradio-yolo_detect
+  source_stage: gradio_acquire_yolo_detect
+  target_stage: yolo_detect
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: gradio-yolo_track
+  source_stage: gradio_acquire_yolo_track
+  target_stage: yolo_track
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: yolo_detect-gradio
+  source_stage: yolo_detect
+  target_stage: gradio_display_yolo_detect
+  pipeline: full_gradio
+---
+kind: link
+spec:
+  name: yolo_track-gradio
+  source_stage: yolo_track
+  target_stage: gradio_display_yolo_track
   pipeline: full_gradio

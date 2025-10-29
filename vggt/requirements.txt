@@ -15,3 +15,4 @@ gradio
 matplotlib
 opencv-python
 onnxruntime
+requests

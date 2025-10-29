@@ -54,16 +54,39 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
     def __init__(self):
         # Always load to CPU first
-        self._model = VGGT()
-        self._model.load_state_dict(
-            torch.load("./vggt-1b.pt", map_location="cpu")
-        )
+        self._model = None
         self._device = "cpu"
-        logging.info("Model loaded on CPU")
         self._last_request_time = time.time()
         self._lock = threading.Lock()
+
+        self._load_event = threading.Event()
+        self._load_error = None
+        self._pending_device = None
+
+        # Background model loader
+        self._loader_thread = threading.Thread(target=self._load_model_async, daemon=True)
+        self._loader_thread.start()
+
+        # Watchdog thread
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
+
+
+    def _load_model_async(self):
+        """Background thread that loads VGGT model."""
+        try:
+            logging.info("Loading VGGT model asynchronously...")
+            mdl = VGGT()
+            mdl.load_state_dict(torch.load("./vggt-1b.pt", map_location="cpu"))
+            with self._lock:
+                self._model = mdl
+                self._device = "cpu"
+            logging.info("VGGT model fully loaded on CPU.")
+        except Exception as e:
+            self._load_error = f"{type(e).__name__}: {e}"
+            logging.exception("Failed to load VGGT model")
+        finally:
+            self._load_event.set()
 
     def _watchdog_loop(self):
         while True:
@@ -90,12 +113,12 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
             try:
                 logging.info(f"Reinitializing VGGT model on {target}")
-                # Reinstantiate model fresh on target device
+                
                 new_model = VGGT().to(target)
                 new_model.load_state_dict(
                     self._model.state_dict(), strict=False
                 )
-                # Replace old one
+                
                 del self._model
                 torch.cuda.empty_cache()
                 self._model = new_model
@@ -107,6 +130,19 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
     def Process(self, request, context):
         start = time.time()
+        # Wait for model load to complete (blocking)
+        while not self._load_event.is_set():
+            logging.info("VGGT model still loading... waiting before processing.")
+            time.sleep(1)
+
+        if self._load_error:
+            logging.error(f"VGGT model failed to load: {self._load_error}")
+            return vggt_pb2.Envelope(
+                config_json=json.dumps({
+                    "VGGT": {"status": "error", "error": self._load_error}
+                })
+            )
+        
         results = {}
         try:
             if not request.config_json:
@@ -120,7 +156,7 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
             requested_device = params.get("device", None)
 
             if requested_device:
-                new_dev = self.set_device(requested_device)
+                _ = self.set_device(requested_device)
 
             if not request.data.get("images", []):
                 return vggt_pb2.Envelope(config_json=request.config_json)
