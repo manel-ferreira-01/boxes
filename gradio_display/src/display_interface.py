@@ -24,7 +24,7 @@ class GradioDisplay:
 
         # central registry of in/out files by algorithm
         self.file_map = {}
-        for algo in ["yolo", "vggt"]:
+        for algo in ["yolo_track", "yolo_detect", "vggt"]:
             self.file_map[algo] = {
                 "in": os.path.join(tmp_data_folder, f"{algo}_in.mat"),
                 "out": os.path.join(tmp_data_folder, f"{algo}_out.mat"),
@@ -234,10 +234,10 @@ class GradioDisplay:
             return None, tmp, None
 
         self._write_request(
-            "yolo",
+            "yolo_detect",
             {"gradio": [galeria, label], "command": "detectsequence", "parameters": " "},
         )
-        logging.info(f"written in:{self._get_files('yolo')}")
+        logging.info(f"written in:{self._get_files('yolo_detect')}")
 
         def transform(ret_data):
             annotations = json.loads(ret_data[1])
@@ -260,7 +260,7 @@ class GradioDisplay:
                 list(self.output_files[request.session_hash]["files"].values()),
             )
 
-        return self._wait_for_response("yolo", transform_fn=transform)
+        return self._wait_for_response("yolo_detect", transform_fn=transform)
 
 
     #---- TRACKING PROCESS -- TODO: collapse with detection into one single function.
@@ -301,7 +301,7 @@ class GradioDisplay:
             countdown = total_frames - idx  # goes to 0 at the last frame
 
             self._write_request(
-                "yolo",
+                "yolo_track",
                 {
                     "gradio": [[[frame, y]], label],
                     "command": "tracksequence",
@@ -320,7 +320,7 @@ class GradioDisplay:
                 all_annotations.append(annotations)
                 return ret_data[0][0]  # annotated numpy image
 
-            annotated_frame = self._wait_for_response("yolo", transform_fn=transform)
+            annotated_frame = self._wait_for_response("yolo_track", transform_fn=transform)
             annotated_frames.append(annotated_frame)
 
         # --- Write merged CSV + JSON ---
