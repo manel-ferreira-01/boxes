@@ -29,6 +29,7 @@ import numpy as np
 import zstandard as zstd
 import io
 import traceback
+from queue import Queue
 
 def numpy_bytes_to_data(b: bytes) -> np.ndarray:
     buf = io.BytesIO(b)
@@ -92,95 +93,96 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         self.observer.start()
         logging.info(f"Watching folder: {self.input_folder}")
 
+        self.videos = {}               # active videos {name: {"frames":[], "index":int}}
+        self.video_queue = Queue()     # waiting queue
+        threading.Thread(target=self._video_worker, daemon=True).start()
+
     # ------------------------------------------------------------------
     # --- Dispatch based on file type
     # ------------------------------------------------------------------
     def _schedule_process(self, path):
         if path.lower().endswith((".mp4", ".avi", ".mov", ".mkv")):
-            logging.info("Scheduling video processing")
-            threading.Thread(target=self._process_video, args=(path,), daemon=True).start()
+            logging.info(f"Queueing new video: {path}")
+            self.video_queue.put(path)
         elif path.lower().endswith((".jpg", ".png")):
-            logging.info("Scheduling image batch processing")
-            # if no videos in the folder, just process images
             threading.Thread(target=self._process_images_batch, daemon=True).start()
 
-    # ------------------------------------------------------------------
-    # --- Video handling
-    # ------------------------------------------------------------------
-    def _process_video(self, video_path, max_size=(1280, 720)):
-        """Extract frames and prepare first frame for processing."""
+    def _video_worker(self):
+        """Background thread that processes videos in sequence."""
+        while True:
+            path = self.video_queue.get()
+            try:
+                self._process_video(path)
+                # --- Wait until video finishes before moving to next ---
+                while self.active_video is not None:
+                    time.sleep(0.5)
+            except Exception as e:
+                logging.error(f"Error processing {path}: {e}")
+            finally:
+                self.video_queue.task_done()
+
+
+    def _process_video(self, video_path, max_size=(1920, 1080)):
+        """Extract frames, enqueue per-frame envelopes with stream flag."""
         logging.info(f"Extracting frames from video: {video_path}")
         cap = cv2.VideoCapture(video_path)
         frames = []
         max_w, max_h = max_size
-
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-
-            # --- Resize if needed ---
             h, w = frame.shape[:2]
             if w > max_w or h > max_h:
                 scale = min(max_w / w, max_h / h)
-                new_size = (int(w * scale), int(h * scale))
-                frame = cv2.resize(frame, new_size, interpolation=cv2.INTER_AREA)
-
-            # --- Encode to bytes ---
+                frame = cv2.resize(frame, (int(w*scale), int(h*scale)))
             _, buf = cv2.imencode(".jpg", frame)
             frames.append(buf.tobytes())
-
         cap.release()
 
+        video_name = os.path.basename(video_path)
+        self.output_folder = os.path.join(self.base_output_folder, os.path.splitext(video_name)[0])
+        os.makedirs(self.output_folder, exist_ok=True)
 
-        with self.lock:
-            self.video_frames = frames
-            self.frame_index = 0
-            self.active_video = os.path.basename(video_path)
-            self.output_folder = os.path.join(self.base_output_folder, os.path.basename(os.path.splitext(self.active_video)[0]))
-            #TODO: THIS BREAKS WHEN MULTIPLE VIDEOS ARE PROCESSED SIMULTANEOUSLY
-            
-            os.makedirs(self.output_folder, exist_ok=True)
-            self.video_mode = True
-            self._prepare_next_frame()
+        self.videos[video_name] = {"frames": frames, "index": 0, "output": self.output_folder}
+        self.active_video = video_name
 
-        logging.info(f"Loaded {len(frames)} frames from {video_path}")
+        # trigger sending first frame
+        self._prepare_next_frame()
+        logging.info(f"Loaded {len(frames)} frames for {video_name}")
 
-    def _prepare_next_frame(self, max_size=(1280, 720)):
-
-        """Prepare the next frame as an envelope."""
-        if self.frame_index >= len(self.video_frames):
-            logging.info("All video frames processed.")
-            self.last_envelope = None
-            self.video_mode = False
-
-            # Select processed frames properly
-            processed_list = sorted(self.processed_frames)
-            processed_frames = [self.video_frames[i] for i in processed_list]
-
-            with self.lock:
-                self.vggt_envelope = folder_wd_pb2.Envelope(
-                    data={"images": wrap_value(processed_frames)},
-                    config_json=json.dumps({"parameters": {"device": "cuda:1"}})
-                )
-
-            logging.info("Prepared vggt_envelope with processed frames.")
+    def _prepare_next_frame(self):
+        """Prepare the next frame envelope for a specific video."""
+        if not self.active_video or self.active_video not in self.videos:
+            logging.warning("No active video to prepare next frame for.")
             return
 
-        self.frame_bytes = self.video_frames[self.frame_index]
+        vid = self.videos[self.active_video]
+        frames, idx = vid["frames"], vid["index"]
+        total = len(frames)
+        self.frame_index = idx
+        if idx >= total:
+            logging.info(f"Video {self.active_video} finished.")
+            self.videos.pop(self.active_video, None)
+            self.active_video = None
+            return
         
+        self.frame_bytes = frames[idx]
+        countdown = total - idx - 1  # stream flag
         annotations = {
-            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "motion_thresh": 35},
-            "frame_index": self.frame_index,
-            "video_name": self.active_video,
-            "timestamp": datetime.datetime.now().isoformat(),
-        } #TODO: add stream field to this
+            "parameters": {"ssim_thresh": 0.70, "blur_kernel": 5, "device":"cuda:1",
+                           "motion_thresh": 45},
+            "frame_index": idx,
+            "stream": countdown
+        }
 
-        #logging.info(f"Prepared frame {self.frame_index} of video {self.active_video}")
-        self.last_envelope = folder_wd_pb2.Envelope(
-            config_json=json.dumps({"opencv": annotations}),
-            data={"images": wrap_value([self.frame_bytes])},
-        )
+        with self.lock:
+            self.last_envelope = folder_wd_pb2.Envelope(
+                config_json=json.dumps({"opencv": annotations}),
+                data={"images": wrap_value([self.frame_bytes])}
+            )
+
+        logging.info(f"Prepared frame {idx+1}/{total} for video {self.active_video} with stream={countdown}")
 
     # ------------------------------------------------------------------
     # --- Image batch handling
@@ -204,7 +206,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             images.append(buf.tobytes())
 
         annotations = {
-            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 35},
+            "parameters": {"ssim_thresh": 0.90, "blur_kernel": 5, "motion_thresh": 45},
             "timestamp": datetime.datetime.now().isoformat(),
             "input_count": len(images),
         }
@@ -306,9 +308,10 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                         with open(out_path, "wb") as f:
                             pickle.dump(pkl, f)
 
-                    if self.video_mode:
-                        self.frame_index += 1
+                    if self.active_video and self.active_video in self.videos:
+                        self.videos[self.active_video]["index"] += 1
                         self._prepare_next_frame()
+
 
                 return folder_wd_pb2.Empty()
             except Exception as e:
@@ -348,7 +351,7 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
                         os.makedirs(os.path.dirname(out_path_json), exist_ok=True) # just to check
                         with open(out_path_json, "w") as f:
                             json.dump(out_json["YOLO"], f)
-
+                        
                     # ONLY THE LANGSAM PREPARES THE FRAMES, SINCE IT WOULD PROBABLY TAKES MORE TIME THAN YOLO
 
                 return folder_wd_pb2.Empty()
