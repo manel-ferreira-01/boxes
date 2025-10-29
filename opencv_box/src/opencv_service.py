@@ -174,6 +174,11 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         except Exception:
             #logging.warning("Invalid or missing parameters in config_json. Using defaults.")
             parameters = {}
+        
+        try:
+            stream_countdown = json.loads(request.config_json)["opencv"].get("stream", None)
+        except Exception:
+            stream_countdown = None
 
         # --- Common parameters ---
         self.blur_kernel = parameters.get("blur_kernel", 5)
@@ -307,8 +312,9 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             "metric": metric_val,
             "changed": bool(changed),
             "runtime": time.time() - start_time,
-            "parameters": {"device": "cuda:1"}
-            #create a random hash to identify the frame
+            "parameters": {"device": "cuda:1"},
+            #pass the stream_coutndown if any
+            "stream": stream_countdown,
         }
 
         return folder_wd_pb2.Envelope(

@@ -14,6 +14,7 @@ import numpy as np
 import json
 import base64
 from ultralytics import YOLO
+import traceback
 
 # VERIFY THE PORT NUMBER 
 _PORT_ENV_VAR = 'PORT'
@@ -70,20 +71,30 @@ class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
         try:
             # ---- Parse and validate config ----
             if not request.config_json:
-                raise ValueError("Missing config_json in request")
+                return yolo_pb2.Envelope()
 
             try:
                 config = json.loads(request.config_json)
             except json.JSONDecodeError:
-                raise ValueError("config_json is not valid JSON")
+                logging.error("config_json is not valid JSON")
+            
+            stream_countdown = config.get("stream", None)
 
             # ---- Extract and validate images ----
-            img_list = unwrap_value(request.data.get("images", []))
-            if not img_list:
-                raise ValueError("No images provided in request.data['images']")
-
+            try:
+                img_list = unwrap_value(request.data.get("images", []))
+            except Exception as e:
+                # there is no image but there is a stream countdown == 0
+                logging.info(f"YOLO: TrackSequence called with stream_countdown={stream_countdown}")
+                if stream_countdown==0:
+                    self.reset_tracker()
+                return yolo_pb2.Envelope(config_json=request.config_json)
+                
             # ---- Run tracking ----
             annotated_images, detections = TrackSequence(self.model, img_list, config)
+
+            if stream_countdown == 0:
+                self.reset_tracker()
 
             # ---- Build successful response ----
             return yolo_pb2.Envelope(
@@ -92,11 +103,18 @@ class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
             )
 
         except Exception as e:
-            #logging.error(f"[TrackSequence] {e}")
-            error_json = json.dumps({"YOLO_error": str(e)})
-            return yolo_pb2.Envelope(
-                config_json=error_json
-            )
+            tb = traceback.format_exc()
+            logging.error(f"[TrackSequence] Unhandled exception:\n{tb}")
+            return yolo_pb2.Envelope()
+
+    def reset_tracker(self):
+        """Reset the YOLO tracker state."""
+        try:
+            if hasattr(self.model.predictor, "trackers"):
+                self.model.predictor.trackers[0].reset()
+                logging.info("YOLO tracker reset successfully.")
+        except Exception as e:
+            logging.error(f"Failed to reset YOLO tracker: {e}")
 
                
 
@@ -172,7 +190,6 @@ def TrackSequence(model, images, yolo_config):
     annotated_images = []
     all_detections = []  # list of lists (per-image detections)
    
-    configtrack = yolo_config.get("trackyoloconfig", {})
     stream_countdown = yolo_config.get("stream", None)
 
     
@@ -180,7 +197,7 @@ def TrackSequence(model, images, yolo_config):
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[..., (2, 1, 0)]  # BGR→RGB
 
-        results = model.track(source=img, persist=True, **configtrack)
+        results = model.track(source=img, persist=True)
 
         # Annotate result
         annotated_frame = cv2.cvtColor(
@@ -206,12 +223,6 @@ def TrackSequence(model, images, yolo_config):
 
 
         all_detections.append(detections_for_img)
-
-    #  Reset tracker when stream == 0
-    if stream_countdown == 0:
-        if hasattr(model.predictor, "trackers"):
-            model.predictor.trackers[0].reset()
-            logging.info("YOLO tracker reset at end of stream.")
 
     return annotated_images, all_detections
 
