@@ -147,12 +147,13 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             received_images.append(img)
 
         #read the text prompts
-        #text_prompts = json.loads(request.config_json).get("text_prompt", [])
-        text_prompts = ["grass. trees. bus. building. people. car. road."]
+        text_prompts = json.loads(request.config_json).get("text_prompt", [])
+        text_prompt_str = ". ".join(text_prompts) + "."
+
         out_list = []
         for image in received_images:
-            output = self._model.predict([image], text_prompts)
-            out_list.append(output[0])
+            output = self._model.predict([image], text_prompt_str)
+            out_list.append(output[0]) # testes
 
         return out_list
 
