@@ -57,7 +57,7 @@ def main():
         "tapnext": {
             "command": "track",
             "parameters": {
-                "grid_size": 32,
+                "grid_size": 30,
                 "reset": False
             }
         },
@@ -87,7 +87,8 @@ def main():
     print(f"Visibles shape: {visibles_tensor.shape}")
     
     # Convert to numpy
-    tracks_np = tracks_tensor.numpy()  # Shape: (1, num_frames, num_points, 2)
+    tracks_np = tracks_tensor.numpy()  # Shape: (num_frames, num_points, 2)
+    print(tracks_np)
     visibles_np = visibles_tensor.numpy()
     
     # Output video path
@@ -102,30 +103,32 @@ def main():
     
     for frame_idx in range(len(frames)):
         frame = frames[frame_idx].copy()
-        frame_tracks = tracks_np[0, frame_idx]  # [num_points, 2]
-        frame_visibles = visibles_np[0, frame_idx]  # [num_points]
+        frame_tracks = tracks_np[frame_idx]  # [num_points, 2]
+        frame_visibles = visibles_np[frame_idx]  # [num_points]
         
         # Draw each track point
         for pt_idx in range(len(frame_tracks)):
+            #print("coods", frame_visibles.shape)
             if not frame_visibles[pt_idx]:
                 continue
                 
             coords = frame_tracks[pt_idx]
-            x, y = float(coords[0]), float(coords[1])
+            y, x = float(coords[0]), float(coords[1])
             
             # Skip invalid coordinates (NaN or None)
             if np.isnan(x) or np.isnan(y):
                 continue
             
             # Scale coordinates to original frame size
-            scale_x, scale_y = orig_w / 256.0, orig_h / 256.0
-            x_scaled = int(x * scale_x)
-            y_scaled = int(y * scale_y)
+            #scale_x, scale_y = orig_w / 256.0, orig_h / 256.0
+            #x_scaled = int(x / scale_x)
+            #y_scaled = int(y / scale_y)
+            #print(x_scaled, y_scaled)
             
             # Color based on track ID
             color = tuple(int(c) for c in np.array(plt.cm.rainbow(pt_idx / len(frame_tracks)))[:3] * 255)
             
-            cv2.circle(frame, (x_scaled, y_scaled), radius=4, color=color, thickness=-1)
+            cv2.circle(frame, (int(x), int(y)), radius=4, color=color, thickness=-1)
         
         out.write(frame)
     

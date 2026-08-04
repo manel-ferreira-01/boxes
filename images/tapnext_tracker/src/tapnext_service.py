@@ -40,10 +40,9 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         self._lock = threading.Lock()
         self._load_event = threading.Event()
         
-        # State tracking aligned with tracker.py logic
         self.tracking_state = None
-        self.active_tracks = {}   # slot_idx -> track_id
-        self.track_histories = {} # track_id -> list of (frame_idx, pos_tensor)
+        self.active_tracks = {}
+        self.track_histories = {}
         self.next_track_id = 0
         self.frame_counter = 0
         self.initialized = False
@@ -77,7 +76,7 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 restore_model_from_jax_checkpoint(model, checkpoint_path)
                 logging.info(f"Loaded checkpoint from {checkpoint_path}")
             else:
-                logging.warning(f"Checkpoint not found at {checkpoint_path}, running initialized weights.")
+                logging.warning(f"Checkpoint not found at {checkpoint_path}")
             
             self._model = model
         except Exception as e:
@@ -136,6 +135,9 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                     config_json=json.dumps({"tapnext": {"status": "error", "error": "No images in data"}})
                 )
             
+            # Reset state for new sequence processing batch
+            self.reset_tracking()
+            
             all_tracks = []
             all_visibles = []
             
@@ -187,14 +189,12 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
             frame_np = cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB)
         
         orig_h, orig_w = frame_np.shape[:2]
-        # 1. Resize to 256x256 (shape stays [256, 256, 3] -> [H, W, C])
+        
+        # 1. Resize frame to 256x256
         frame_resized = cv2.resize(frame_np, (256, 256))
         
-        # 2. Convert to float tensor without permuting dimensions
-        # Shape: [256, 256, 3]
+        # 2. Prepare tensor: [B=1, T=1, H=256, W=256, C=3]
         frame_tensor = torch.from_numpy(frame_resized).float() / 255.0
-        
-        # 3. Add Batch and Time dimensions -> [B=1, T=1, H=256, W=256, C=3]
         frame_tensor = frame_tensor.unsqueeze(0).unsqueeze(0).to(self._device)
 
         current_frame_idx = self.frame_counter
@@ -205,20 +205,20 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 if not self.initialized:
                     grid_size = parameters.get("grid_size", 32)
                     
-                    # Generate normalized query points in (t, y, x) format [0, 1]
-                    y_coords = np.linspace(0.05, 0.95, grid_size)
-                    x_coords = np.linspace(0.05, 0.95, grid_size)
-                    yy, xx = np.meshgrid(y_coords, x_coords, indexing='ij')
+                    # FIX: Correct coordinate ordering [t, x, y] for PyTorch grid_sample
+                    x_coords = np.linspace(10.0, 246.0, grid_size)
+                    y_coords = np.linspace(10.0, 246.0, grid_size)
+                    xx, yy = np.meshgrid(x_coords, y_coords, indexing='xy')
                     
                     query_points = []
-                    for y, x in zip(yy.flatten(), xx.flatten()):
-                        query_points.append([0.0, y, x])
+                    for x, y in zip(xx.flatten(), yy.flatten()):
+                        query_points.append([0.0, float(x), float(y)])
                     
                     query_points_tensor = torch.tensor(
                         query_points, dtype=torch.float32
                     ).unsqueeze(0).to(self._device) # [1, N, 3]
                     
-                    # TAPNext initialization on video tensor slice [1, 1, 3, 256, 256]
+                    # TAPNext initialization
                     tracks, track_logits, visible_logits, self.tracking_state = self._model(
                         video=frame_tensor,
                         query_points=query_points_tensor
@@ -250,15 +250,21 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 
                 self.frame_counter += 1
                 
-                # Rescale coordinates to original frame size (W, H)
-                tracks_np = tracks.cpu().numpy()[0, 0] # [N, 2]
+                tracks_np = tracks.cpu().numpy()[0, 0].copy() # [N, 2] -> (x, y)
                 visibles_np = (visible_logits.cpu().numpy()[0, 0] > 0)
-                
-                scale_x, scale_y = orig_w / 256.0, orig_h / 256.0
-                tracks_np[:, 0] *= scale_x
-                tracks_np[:, 1] *= scale_y
-                
-                return tracks_np, visibles_np
+
+                # 2. Flip column order from (x, y) to (y, x)
+                tracks_yx = tracks_np # Index 0 is now Y, Index 1 is now X
+
+                # 3. Calculate scaling factors matching (y, x) -> (orig_h, orig_w)
+                scale_y = orig_h / 256.0
+                scale_x = orig_w / 256.0
+
+                # 4. Scale Y by scale_y, X by scale_x
+                tracks_yx[:, 0] *= scale_y  # Y coordinate (scaled to orig_h)
+                tracks_yx[:, 1] *= scale_x  # X coordinate (scaled to orig_w)
+
+                return tracks_yx, visibles_np
 
     def _serialize_tensor(self, tensor):
         buf = io.BytesIO()
