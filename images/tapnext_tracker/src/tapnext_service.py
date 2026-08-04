@@ -134,10 +134,7 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 return tapnext_pb2.Envelope(
                     config_json=json.dumps({"tapnext": {"status": "error", "error": "No images in data"}})
                 )
-            
-            # Reset state for new sequence processing batch
-            self.reset_tracking()
-            
+                        
             all_tracks = []
             all_visibles = []
             
