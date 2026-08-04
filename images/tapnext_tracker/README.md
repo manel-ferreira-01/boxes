@@ -58,24 +58,9 @@ docker run -v /path/to/checkpoint:/workspace/bootstapnext_ckpt.npz \
 
 The service uses the shared `PipelineService` interface with `Envelope` messages.
 
-#### Request Configuration
+#### Reset Tracking State (one-time initialization)
 
-Send a JSON config in the `config_json` field:
-
-```json
-{
-  "tapnext": {
-    "command": "track",
-    "parameters": {
-      "grid_size": 32,
-      "reset": false
-    }
-  },
-  "stream": 0
-}
-```
-
-#### Tracking Request
+Reset clears any previous tracking state before starting a new sequence:
 
 ```python
 import grpc
@@ -86,6 +71,19 @@ from aux import wrap_value, unwrap_value
 channel = grpc.insecure_channel('localhost:8061')
 stub = proto.PipelineServiceStub(channel)
 
+request = proto.Envelope(
+    config_json=json.dumps({
+        "tapnext": {"command": "reset"}
+    })
+)
+response = stub.Process(request)
+```
+
+#### Tracking Request
+
+Track points in a single frame. The service automatically tracks across sequential frames:
+
+```python
 # Prepare frame data
 with open('frame.jpg', 'rb') as f:
     frame_bytes = f.read()
@@ -94,7 +92,7 @@ request = proto.Envelope(
     config_json=json.dumps({
         "tapnext": {
             "command": "track",
-            "parameters": {"grid_size": 32, "reset": False}
+            "parameters": {"grid_size": 32}
         }
     }),
     data={"images": [wrap_value(frame_bytes)]}
@@ -105,25 +103,14 @@ tracks = unwrap_value(response.data["tracks"])
 visibles = unwrap_value(response.data["visibles"])
 ```
 
-#### Reset Tracking State
-
-```python
-request = proto.Envelope(
-    config_json=json.dumps({
-        "tapnext": {
-            "command": "reset"
-        }
-    })
-)
-response = stub.Process(request)
-```
+Each frame you send continues from the previous tracking state. No reset flag needed between frames.
 
 ### Configuration Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `command` | string | "track" | Set to "reset" to clear tracking state, "track" for inference |
 | `grid_size` | int | 32 | Number of grid points per dimension (grid_size × grid_size total) |
-| `reset` | bool | false | Reset tracking state and start fresh |
 
 ### Response Format
 
@@ -178,9 +165,9 @@ docker run --gpus all \
 ## Performance Notes
 
 - First inference call loads the model (~740MB checkpoint)
-- Model stays on GPU after loading unless idle for 60 seconds
+- Model stays on GPU after loading unless idle for 120 seconds
 - Grid detection generates (grid_size × grid_size) query points per frame
-- Track state accumulates until explicitly reset
+- Track state persists across sequential frames until explicitly reset
 
 ## Troubleshooting
 
