@@ -2,10 +2,10 @@
 """Test script for TAPNext gRPC service."""
 
 import sys
-sys.path.append("/workspace/protos")
+sys.path.append("../protos")
 
 import grpc
-from protos import pipeline_pb2, pipeline_pb2_grpc, aux
+import pipeline_pb2, pipeline_pb2_grpc, aux
 import json
 
 def load_frame_bytes(video_path):
@@ -30,7 +30,7 @@ def main():
     print("Testing TAPNext point tracking service...")
     
     # Load test video frames
-    video_path = "./test/apple.mp4"
+    video_path = "./apple.mp4"
     try:
         frames = load_frame_bytes(video_path)
         print(f"Loaded {len(frames)} frames from test video")

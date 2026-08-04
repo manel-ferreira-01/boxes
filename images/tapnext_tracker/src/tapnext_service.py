@@ -7,19 +7,17 @@ import time
 import json
 import sys
 import io
+import threading
 
-# Copy proto files from vggt/protos (or symlink)
 sys.path.append("./protos")
 import pipeline_pb2 as tapnext_pb2
 import pipeline_pb2_grpc as tapnext_pb2_grpc
-import threading
 from aux import wrap_value, unwrap_value
 
 import numpy as np
 import torch
 import cv2
 
-# Import from tapnet package (copied during build)
 from tapnet.tapnext.tapnext_torch import TAPNext
 from tapnet.tapnext.tapnext_torch_utils import restore_model_from_jax_checkpoint
 
@@ -33,43 +31,34 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-
 class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
     
     def __init__(self):
         self._model = None
-        self._device = "cpu"
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._last_request_time = time.time()
         self._lock = threading.Lock()
-        
-        # Load event for sync (must be created before threads start)
         self._load_event = threading.Event()
         
-        # Tracking state maintained across requests
+        # State tracking aligned with tracker.py logic
         self.tracking_state = None
-        self.all_tracks = {}  # track_id -> list of (frame_idx, x, y) or None
+        self.active_tracks = {}   # slot_idx -> track_id
+        self.track_histories = {} # track_id -> list of (frame_idx, pos_tensor)
         self.next_track_id = 0
         self.frame_counter = 0
         self.initialized = False
         
-        # Load model on background thread to avoid blocking server startup
         self._loader_thread = threading.Thread(target=self._load_model_async, daemon=True)
         self._loader_thread.start()
         
-        # Watchdog to move model back to CPU when idle
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
         
-        logging.info("TAPNext service initialized (background loading)")
+        logging.info("TAPNext service initialized.")
     
     def _load_model_async(self):
-        """Background thread that loads TAPNext model."""
         try:
             logging.info("Loading TAPNext model...")
-            
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._device = device
-            
             model = TAPNext(
                 image_size=(256, 256),
                 width=768,
@@ -77,59 +66,47 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 num_heads=12,
                 lru_width=768,
                 depth=12,
-            )
+            ).to(self._device)
             
-            checkpoint_path = "/workspace/bootstapnext_ckpt.npz"
-            if os.path.exists(checkpoint_path):
-                logging.info(f"Loading checkpoint from {checkpoint_path}")
-                restore_model_from_jax_checkpoint(model, checkpoint_path)
-                logging.info("TAPNext model checkpoint loaded successfully")
-            else:
-                raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
-            
-            model.to(device)
             model.eval()
             for p in model.parameters():
                 p.requires_grad = False
             
+            checkpoint_path = "/workspace/bootstapnext_ckpt.npz"
+            if os.path.exists(checkpoint_path):
+                restore_model_from_jax_checkpoint(model, checkpoint_path)
+                logging.info(f"Loaded checkpoint from {checkpoint_path}")
+            else:
+                logging.warning(f"Checkpoint not found at {checkpoint_path}, running initialized weights.")
+            
             self._model = model
-            logging.info(f"TAPNext model loaded on {device}")
         except Exception as e:
             logging.exception(f"Failed to load TAPNext model: {e}")
         finally:
             self._load_event.set()
     
     def _watchdog_loop(self):
-        """Move model back to CPU when idle for IDLE_TIMEOUT seconds."""
         while True:
             time.sleep(30)
-            with self._lock if hasattr(self, "_lock") and self._lock else threading.Lock():
-                if not hasattr(self, '_last_request_time'):
-                    continue
+            with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > _IDLE_TIMEOUT and self._device == "cuda":
-                    logging.info("Idle timeout: moving model back to CPU")
+                if idle_time > _IDLE_TIMEOUT and self._device == "cuda" and self._model is not None:
+                    logging.info("Idle timeout: moving model to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
                     self._device = "cpu"
-    
+
     def Process(self, request, context):
-        # Wait for model load to complete
         while not self._load_event.is_set():
-            time.sleep(0.5)
+            time.sleep(0.1)
         
-        with self._lock if hasattr(self, "_lock") and self._lock else threading.Lock():
+        with self._lock:
             self._last_request_time = time.time()
-            
-            # Restore to GPU if needed
-            if self._device == "cpu" and torch.cuda.is_available() and hasattr(self, '_model'):
-                logging.info("Request received: moving model to GPU")
-                try:
-                    self._model.to("cuda")
-                    self._device = "cuda"
-                except Exception as e:
-                    logging.warning(f"Failed to move to GPU: {e}")
-        
+            if self._device == "cpu" and torch.cuda.is_available() and self._model is not None:
+                logging.info("Request received: restoring model to GPU")
+                self._model.to("cuda")
+                self._device = "cuda"
+
         start_time = time.time()
         
         try:
@@ -142,30 +119,21 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
             tapnext_config = config.get("tapnext", {})
             parameters = tapnext_config.get("parameters", {}) or {}
             
-            # Check for reset command
             if tapnext_config.get("command") == "reset" or parameters.get("reset"):
                 self.reset_tracking()
                 return tapnext_pb2.Envelope(
-                    config_json=json.dumps({
-                        "tapnext": {"status": "done", "action": "reset"}
-                    })
+                    config_json=json.dumps({"tapnext": {"status": "done", "action": "reset"}})
                 )
             
-            # Handle empty request
             if not request.data.get("images"):
                 return tapnext_pb2.Envelope(
-                    config_json=json.dumps({
-                        "tapnext": {"status": "empty_request"}
-                    })
+                    config_json=json.dumps({"tapnext": {"status": "empty_request"}})
                 )
             
-            # Process images
             image_bytes_list = unwrap_value(request.data["images"])
             if not isinstance(image_bytes_list, list) or len(image_bytes_list) == 0:
                 return tapnext_pb2.Envelope(
-                    config_json=json.dumps({
-                        "tapnext": {"status": "error", "error": "No images in data"}
-                    })
+                    config_json=json.dumps({"tapnext": {"status": "error", "error": "No images in data"}})
                 )
             
             all_tracks = []
@@ -177,12 +145,10 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                     continue
                 
                 tracks, visibles = self._track_frame(frame_np, parameters)
-                
                 if tracks is not None:
                     all_tracks.append(tracks)
                     all_visibles.append(visibles)
             
-            # Serialize outputs
             response_data = {}
             if all_tracks:
                 response_data["tracks"] = wrap_value(self._serialize_tensor(torch.tensor(all_tracks)))
@@ -202,101 +168,107 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         except Exception as e:
             logging.exception(f"Error in Process: {e}")
             return tapnext_pb2.Envelope(
-                config_json=json.dumps({
-                    "tapnext": {"status": "error", "error": str(e)}
-                })
+                config_json=json.dumps({"tapnext": {"status": "error", "error": str(e)}})
             )
-    
+
     def _decode_image(self, img_bytes):
-        """Decode image bytes to numpy array."""
         try:
             nparr = np.frombuffer(img_bytes, np.uint8)
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if frame is None:
-                from PIL import Image
-                import io as pil_io
-                img_pil = Image.open(pil_io.BytesIO(img_bytes)).convert("RGB")
-                frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-            
             return frame
         except Exception as e:
             logging.error(f"Failed to decode image: {e}")
             return None
-    
+
     def _track_frame(self, frame_np, parameters):
-        """Track points in a single frame."""
         if frame_np.ndim == 2:
             frame_np = cv2.cvtColor(frame_np, cv2.COLOR_GRAY2RGB)
+        else:
+            frame_np = cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB)
         
-        h, w = frame_np.shape[:2]
-        
-        # Resize to model input size (256x256)
+        orig_h, orig_w = frame_np.shape[:2]
+        # 1. Resize to 256x256 (shape stays [256, 256, 3] -> [H, W, C])
         frame_resized = cv2.resize(frame_np, (256, 256))
-        frame_tensor = torch.from_numpy(frame_resized).float().permute(2, 0, 1) / 255.0
-        frame_tensor = frame_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, C, H, W]
-        frame_tensor = frame_tensor.to(self._device)
+        
+        # 2. Convert to float tensor without permuting dimensions
+        # Shape: [256, 256, 3]
+        frame_tensor = torch.from_numpy(frame_resized).float() / 255.0
+        
+        # 3. Add Batch and Time dimensions -> [B=1, T=1, H=256, W=256, C=3]
+        frame_tensor = frame_tensor.unsqueeze(0).unsqueeze(0).to(self._device)
+
+        current_frame_idx = self.frame_counter
         
         with torch.no_grad():
-            if not self.initialized:
-                # First frame: initialize with grid or query points
-                grid_size = parameters.get("grid_size", 32)
+            use_amp = (self._device == "cuda")
+            with torch.amp.autocast(self._device, dtype=torch.float16, enabled=use_amp):
+                if not self.initialized:
+                    grid_size = parameters.get("grid_size", 32)
+                    
+                    # Generate normalized query points in (t, y, x) format [0, 1]
+                    y_coords = np.linspace(0.05, 0.95, grid_size)
+                    x_coords = np.linspace(0.05, 0.95, grid_size)
+                    yy, xx = np.meshgrid(y_coords, x_coords, indexing='ij')
+                    
+                    query_points = []
+                    for y, x in zip(yy.flatten(), xx.flatten()):
+                        query_points.append([0.0, y, x])
+                    
+                    query_points_tensor = torch.tensor(
+                        query_points, dtype=torch.float32
+                    ).unsqueeze(0).to(self._device) # [1, N, 3]
+                    
+                    # TAPNext initialization on video tensor slice [1, 1, 3, 256, 256]
+                    tracks, track_logits, visible_logits, self.tracking_state = self._model(
+                        video=frame_tensor,
+                        query_points=query_points_tensor
+                    )
+                    
+                    num_feats = tracks.shape[2]
+                    for i in range(num_feats):
+                        tid = self.next_track_id
+                        self.next_track_id += 1
+                        self.active_tracks[i] = tid
+                        vis = visible_logits[0, 0, i].item() > 0
+                        pos = tracks[0, 0, i, :2].cpu() if vis else None
+                        self.track_histories[tid] = [(current_frame_idx, pos)]
+                    
+                    self.initialized = True
+                else:
+                    # Sequential step inference using saved tracking_state
+                    tracks, track_logits, visible_logits, self.tracking_state = self._model(
+                        video=frame_tensor,
+                        state=self.tracking_state
+                    )
+                    
+                    visible = (visible_logits[0, 0] > 0).cpu()
+                    for i in range(tracks.shape[2]):
+                        tid = self.active_tracks.get(i, None)
+                        if tid is not None:
+                            pos = tracks[0, 0, i, :2].cpu() if visible[i] else None
+                            self.track_histories[tid].append((current_frame_idx, pos))
                 
-                # Generate query points on grid
-                y_coords = np.linspace(0, 1, grid_size)
-                x_coords = np.linspace(0, 1, grid_size)
-                xx, yy = np.meshgrid(x_coords, y_coords)
-                query_points_np = np.stack([xx.flatten(), yy.flatten()], axis=1)  # [N, 2]
+                self.frame_counter += 1
                 
-                # Create query points with time=0
-                query_points = []
-                for x, y in query_points_np:
-                    query_points.append([0.0, x, y])
-                query_points_tensor = torch.tensor(query_points).float().unsqueeze(0).to(self._device)
+                # Rescale coordinates to original frame size (W, H)
+                tracks_np = tracks.cpu().numpy()[0, 0] # [N, 2]
+                visibles_np = (visible_logits.cpu().numpy()[0, 0] > 0)
                 
-                # Run initial inference
-                tracks, track_logits, visible_logits, self.tracking_state = self._model(
-                    frame_tensor,
-                    query_points=query_points_tensor,
-                    state=None
-                )
+                scale_x, scale_y = orig_w / 256.0, orig_h / 256.0
+                tracks_np[:, 0] *= scale_x
+                tracks_np[:, 1] *= scale_y
                 
-                # Initialize tracking history
-                num_points = tracks.shape[2]
-                for i in range(num_points):
-                    self.all_tracks[self.next_track_id] = [(0, x.item(), y.item()) if visible_logits[0, 0, i].item() > 0 else (0, None, None)]
-                    self.next_track_id += 1
-                
-                self.initialized = True
-            else:
-                # Subsequent frames: continue with state preservation
-                tracks, track_logits, visible_logits, self.tracking_state = self._model(
-                    frame_tensor,
-                    query_points=None,
-                    state=self.tracking_state
-                )
-            
-            # Convert to numpy and resize coords back to original dimensions
-            tracks_np = tracks.cpu().numpy()[0, 0]  # [N, 2]
-            visibles_np = visible_logits.cpu().numpy()[0, 0] > 0
-            
-            # Scale coordinates back to original frame size
-            scale_y, scale_x = h / 256.0, w / 256.0
-            tracks_np[:, 0] *= scale_x
-            tracks_np[:, 1] *= scale_y
-            
-            return tracks_np, visibles_np
-    
+                return tracks_np, visibles_np
+
     def _serialize_tensor(self, tensor):
-        """Serialize torch tensor to bytes."""
         buf = io.BytesIO()
         torch.save(tensor.cpu(), buf, pickle_protocol=4)
         return buf.getvalue()
-    
+
     def reset_tracking(self):
-        """Reset tracking state for new sequence."""
         self.tracking_state = None
-        self.all_tracks = {}
+        self.active_tracks = {}
+        self.track_histories = {}
         self.next_track_id = 0
         self.frame_counter = 0
         self.initialized = False
