@@ -37,16 +37,15 @@ wget https://storage.googleapis.com/dm-tapnet/tapnext/bootstapnext_ckpt.npz
 
 ## Building the Docker Image
 
-Copy or mount the checkpoint into the build context before building:
+Build without checkpoint (service checks for checkpoint at runtime):
 
 ```bash
-cp /home/manuelf/tapnet/tapnet/tapnext/bootstapnext_ckpt.npz /path/to/tapnext_tracker/
 docker build --tag sipgisr/tapnexttracker \
     --build-arg SERVICE_NAME=tapnext \
     -f docker/Dockerfile .
 ```
 
-Or use volume mount at runtime:
+Or mount the checkpoint at runtime:
 
 ```bash
 docker run -v /path/to/checkpoint:/workspace/bootstapnext_ckpt.npz \

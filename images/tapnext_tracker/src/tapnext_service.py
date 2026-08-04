@@ -12,6 +12,7 @@ import io
 sys.path.append("./protos")
 import pipeline_pb2 as tapnext_pb2
 import pipeline_pb2_grpc as tapnext_pb2_grpc
+import threading
 from aux import wrap_value, unwrap_value
 
 import numpy as np
@@ -39,7 +40,10 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         self._model = None
         self._device = "cpu"
         self._last_request_time = time.time()
-        self._lock = None
+        self._lock = threading.Lock()
+        
+        # Load event for sync (must be created before threads start)
+        self._load_event = threading.Event()
         
         # Tracking state maintained across requests
         self.tracking_state = None
@@ -49,8 +53,6 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         self.initialized = False
         
         # Load model on background thread to avoid blocking server startup
-        import threading
-        self._load_event = threading.Event()
         self._loader_thread = threading.Thread(target=self._load_model_async, daemon=True)
         self._loader_thread.start()
         
@@ -101,7 +103,7 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         """Move model back to CPU when idle for IDLE_TIMEOUT seconds."""
         while True:
             time.sleep(30)
-            with self._lock or {}:
+            with self._lock if hasattr(self, "_lock") and self._lock else threading.Lock():
                 if not hasattr(self, '_last_request_time'):
                     continue
                 idle_time = time.time() - self._last_request_time
@@ -116,7 +118,7 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         while not self._load_event.is_set():
             time.sleep(0.5)
         
-        with self._lock or {}:
+        with self._lock if hasattr(self, "_lock") and self._lock else threading.Lock():
             self._last_request_time = time.time()
             
             # Restore to GPU if needed
