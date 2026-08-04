@@ -26,12 +26,6 @@ class PipelineService(yolo_pb2_grpc.PipelineServiceServicer):
     def __init__(self):
         self.model = YOLO("yolo11n.pt")  # Ensure this is YOLOv11
         logging.info("YOLOv11 model loaded.")
-#       https://docs.ultralytics.com/modes/predict/#inference-arguments
- 
-       
-    def __init__(self):
-        self.model = YOLO("yolo11n.pt")
-        logging.info("YOLOv11 model loaded.")
 
     def DetectSequence(self, request, context):
         """Run YOLO detection on a batch of images."""
