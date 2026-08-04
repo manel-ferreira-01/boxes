@@ -102,20 +102,23 @@ def main():
     
     print(f"\nProcessing {len(frames)} frames sequentially...")
     
+    # Clear any previous tracking state with explicit reset
+    print("Sending initial reset command...")
+    reset_request = pipeline_pb2.Envelope(
+        config_json=json.dumps({"tapnext": {"command": "reset"}})
+    )
+    stub.Process(reset_request)
+    
     # Process each frame individually
     for frame_idx in range(len(frames)):
         # Encode single frame
         _, buf = cv2.imencode('.jpg', frames[frame_idx])
         frame_bytes_list = [buf.tobytes()]
         
-        # First frame: initialize with grid (reset=True), rest: continue tracking
         config = {
             "tapnext": {
                 "command": "track",
-                "parameters": {
-                    "grid_size": 30,
-                    "reset": frame_idx == 0  # Only reset on first frame
-                }
+                "parameters": {"grid_size": 30}
             },
             "stream": max(0, len(frames) - 1 - frame_idx)
         }
