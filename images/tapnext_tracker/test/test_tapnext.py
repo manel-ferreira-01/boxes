@@ -2,10 +2,10 @@
 """Test script for TAPNext gRPC service."""
 
 import sys
-sys.path.insert(0, "/workspace/protos")
+sys.path.append("/workspace/protos")
 
 import grpc
-from protos import pipeline_pb2, pipeline_pb2_grpc
+from protos import pipeline_pb2, pipeline_pb2_grpc, aux
 import json
 
 def load_frame_bytes(video_path):
@@ -22,13 +22,6 @@ def load_frame_bytes(video_path):
     cap.release()
     return frames
 
-def make_track_request(frames, config):
-    """Create a track request with multiple frames."""
-    return pipeline_pb2.Envelope(
-        config_json=json.dumps(config),
-        data={"images": [pipeline_pb2.Value(bb=pipeline_pb2.BytesList(values=frames))]}
-    )
-
 def main():
     # Connect to the service
     channel = grpc.insecure_channel('localhost:8061')
@@ -37,16 +30,16 @@ def main():
     print("Testing TAPNext point tracking service...")
     
     # Load test video frames
-    video_path = "/workspace/test/test_video.mp4"
+    video_path = "./test/apple.mp4"
     try:
         frames = load_frame_bytes(video_path)
         print(f"Loaded {len(frames)} frames from test video")
     except Exception as e:
-        print(f"Failed to load video: {e}. Using empty request for basic test.")
-        frames = []
+        print(f"Failed to load video: {e}")
+        print("Testing with minimal request...")
     
-    # Test 1: Basic tracking with grid (32x32 points)
-    if frames:
+    # Test 1: Track request with single frame
+    if 'frames' in locals() and len(frames) > 0:
         config = {
             "tapnext": {
                 "command": "track",
@@ -55,23 +48,22 @@ def main():
                     "reset": False
                 }
             },
-            "stream": len(frames) - 1
+            "stream": max(0, len(frames) - 1)
         }
         
+        request = pipeline_pb2.Envelope(
+            config_json=json.dumps(config),
+            data={"images": aux.wrap_value(frames)}
+        )
+        
         print(f"\nSending tracking request with {len(frames)} frames...")
-        response = stub.Process(make_track_request(frames, config))
+        response = stub.Process(request)
         
         result = json.loads(response.config_json)
         print(f"Response status: {result}")
         
         if response.data:
-            tracks_data = pipeline_pb2.Value()
-            tracks_data.CopyFrom(response.data["tracks"])
-            print(f"Tracks field present in response")
-            
-            visibles_data = pipeline_pb2.Value()
-            visibles_data.CopyFrom(response.data["visibles"])
-            print(f"Visibles field present in response")
+            print("Response data keys:", list(response.data.keys()))
     
     # Test 2: Reset request
     print("\nTesting reset command...")
@@ -84,6 +76,11 @@ def main():
     response_reset = stub.Process(pipeline_pb2.Envelope(config_json=json.dumps(config_reset)))
     result_reset = json.loads(response_reset.config_json)
     print(f"Reset response: {result_reset}")
+    
+    # Test 3: Empty request
+    print("\nTesting empty request...")
+    response_empty = stub.Process(pipeline_pb2.Envelope())
+    print(f"Empty response config: {response_empty.config_json}")
     
     print("\n✓ All tests completed!")
 

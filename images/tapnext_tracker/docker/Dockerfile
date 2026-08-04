@@ -63,5 +63,3 @@ RUN echo "Python path: $PYTHONPATH"
 
 CMD ["python3", "service.py"]
 
-# Copy test files for development/testing
-COPY --chown=${USER}:${GROUP} test ${WORKSPACE}/test 2>/dev/null || true
