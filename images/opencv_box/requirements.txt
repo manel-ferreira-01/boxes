@@ -5,3 +5,6 @@ grpcio-status
 numpy
 opencv-python-headless
 scikit-image
+torch>=2.0.0
+torchvision
+kornia>=0.6.11

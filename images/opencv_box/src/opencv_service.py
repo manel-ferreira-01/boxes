@@ -22,6 +22,7 @@ _PORT_ENV_VAR = 'PORT'
 from skimage.metrics import structural_similarity as ssim
 import cv2
 import numpy as np
+import torch
 
 
 # ---------------------------------------------
@@ -52,29 +53,143 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         self.prev_frame = None
         self.prev_points = None
         self.frame_counter = 0
+        # LightGlue models (lazy initialized)
+        self._lg_extractor = None
+        self._lg_matcher = None
+        self._lg_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    def _init_lightglue(self, extractor_type="superpoint", max_kpts=2048):
+        """Initialize LightGlue models."""
+        if self._lg_extractor is None or self._lg_matcher is None:
+            from lightglue import LightGlue, SuperPoint, DISK
+            try:
+                if extractor_type.lower() == "superpoint" or not extractor_type:
+                    self._lg_extractor = SuperPoint(max_num_keypoints=max_kpts).eval().to(self._lg_device)
+                    self._lg_matcher = LightGlue(features='superpoint').eval().to(self._lg_device)
+                elif extractor_type.lower() == "disk":
+                    self._lg_extractor = DISK(max_num_keypoints=max_kpts).eval().to(self._lg_device)
+                    self._lg_matcher = LightGlue(features='disk').eval().to(self._lg_device)
+                logging.info(f"LightGlue initialized: {extractor_type} on {self._lg_device}")
+            except Exception as e:
+                logging.error(f"LightGlue init failed: {e}")
+                raise
+
+    def _lightglue_process(self, imgs_in, max_kpts):
+        """Process images with LightGlue matching."""
+        self._init_lightglue("superpoint", max_kpts)
+        
+        # Helper to format image tensor for SuperPoint [1, C, H, W]
+        def img2tensor(img_bgr):
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            return torch.from_numpy(img_rgb).permute(2, 0, 1).unsqueeze(0).to(self._lg_device)
+        
+        feats0 = self._lg_extractor.extract(img2tensor(imgs_in[0]))
+        feats1 = self._lg_extractor.extract(img2tensor(imgs_in[1]))
+        
+        # Match features
+        matches_res = self._lg_matcher({'image0': feats0, 'image1': feats1})
+        
+        # Safely unpack keypoints (removing batch dim if present)
+        kps0_t = feats0['keypoints']
+        if isinstance(kps0_t, list):
+            kps0_t = kps0_t[0]
+        elif kps0_t.ndim == 3:
+            kps0_t = kps0_t[0]
+
+        kps1_t = feats1['keypoints']
+        if isinstance(kps1_t, list):
+            kps1_t = kps1_t[0]
+        elif kps1_t.ndim == 3:
+            kps1_t = kps1_t[0]
+
+        kps0 = kps0_t.detach().cpu().numpy()
+        kps1 = kps1_t.detach().cpu().numpy()
+
+        # Safely unpack matches (handling list vs Tensor)
+        raw_matches = matches_res['matches']
+        if isinstance(raw_matches, list):
+            matches_t = raw_matches[0]
+        elif raw_matches.ndim == 3:
+            matches_t = raw_matches[0]
+        else:
+            matches_t = raw_matches
+
+        matches = matches_t.detach().cpu().numpy()
+
+        pts_a = np.zeros((0, 2), dtype=np.float32)
+        pts_b = np.zeros((0, 2), dtype=np.float32)
+
+        if len(matches) > 0:
+            m_idx0 = matches[:, 0]
+            m_idx1 = matches[:, 1]
+            
+            # Mask valid keypoint index matches
+            valid = (m_idx0 < len(kps0)) & (m_idx1 < len(kps1))
+            pts_a = kps0[m_idx0[valid]]
+            pts_b = kps1[m_idx1[valid]]
+
+        # Fundamental matrix via RANSAC
+        F_mat = np.zeros((0, 0), dtype=np.float32)
+        inliers_a = np.zeros((0, 2), dtype=np.float32)
+        inliers_b = np.zeros((0, 2), dtype=np.float32)
+
+        if len(pts_a) >= 8:
+            F_calc, mask = cv2.findFundamentalMat(pts_a, pts_b, cv2.FM_RANSAC, 1.0, 0.99)
+            if F_calc is not None and mask is not None:
+                inlier_mask = mask.ravel().astype(bool)
+                F_mat = F_calc
+                inliers_a = pts_a[inlier_mask]
+                inliers_b = pts_b[inlier_mask]
+
+        # Stack keypoints into padded array shape (2, max_N, 2)
+        all_kpts = [kps0[:max_kpts], kps1[:max_kpts]]
+        max_len = max(len(k) for k in all_kpts) if any(len(k) > 0 for k in all_kpts) else 1
+        
+        padded_kpts = []
+        for k in all_kpts:
+            if len(k) < max_len:
+                pad = np.pad(k, ((0, max_len - len(k)), (0, 0)), mode='constant')
+                padded_kpts.append(pad)
+            else:
+                padded_kpts.append(k)
+                
+        keyp_tensor = np.stack(padded_kpts, axis=0)
+        desc_tensor = np.zeros((2, max_len, 256), dtype=np.float32)
+
+        return {
+            "keypoints": wrap_value(np_to_bytes(keyp_tensor)),
+            "descriptors": wrap_value(np_to_bytes(desc_tensor)),
+            "matches_inliers_a": wrap_value(np_to_bytes(inliers_a)),
+            "matches_inliers_b": wrap_value(np_to_bytes(inliers_b)),
+            "fundamental_matrix": wrap_value(np_to_bytes(F_mat))
+        }
+
+    def _parse_extractor(self, fx_param):
+        """Parse feature extractor parameter."""
+        if not fx_param:
+            return ("SIFT", False)
+        fx_upper = fx_param.upper()
+        if 'SUPERPOINT' in fx_upper or 'DISK' in fx_upper or 'LIGHTGLUE' in fx_upper:
+            return ('superpoint', True)
+        return (fx_upper, False)
 
     def Process(self, request, context):
-        """Process request: extract features and optionally match."""
-
-        #start timer
         start_time = time.time()
-
         if not request.config_json:
             return folder_wd_pb2.Envelope()
 
-        # --- parse parameters safely ---
         try:
             parameters = json.loads(request.config_json)["opencv"]["parameters"]
         except Exception:
-            #logging.warning("Invalid or missing parameters in config_json. Using defaults.")
             parameters = {}
 
-        feature_extractor = parameters.get("feature_extractor", "SIFT").upper()
+        fx_param = parameters.get("feature_extractor", "SIFT")
+        extractor_name, use_lightglue = self._parse_extractor(fx_param)
+        
         ratio_thresh = parameters.get("ratio_thresh", 0.75)
-        max_keypoints = parameters.get("max_keypoints", 500)
+        max_keypoints = parameters.get("max_keypoints", 2048 if use_lightglue else 500)
 
-        # --- decode images ---
+        # Decode images
         imgs_in = []
         try:
             for image_bytes in unwrap_value(request.data.get("images", [])):
@@ -87,10 +202,24 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
         except Exception:
             return folder_wd_pb2.Envelope()
 
-        # Detector setup
-        if feature_extractor == "SIFT":
+        # Execute LightGlue path
+        if use_lightglue and len(imgs_in) == 2:
+            try:
+                result = self._lightglue_process(imgs_in, max_keypoints)
+                out_json = {
+                    "status": "success",
+                    "matcher": f"LightGlue ({extractor_name})",
+                    "runtime": time.time() - start_time,
+                    "timestamp": time.time()
+                }
+                return folder_wd_pb2.Envelope(data=result, config_json=json.dumps(out_json))
+            except Exception as e:
+                logging.error(f"LightGlue execution failed: {e}")
+
+        # Execute OpenCV SIFT/ORB path
+        if extractor_name == "SIFT":
             detector = cv2.SIFT_create(nfeatures=max_keypoints)
-        elif feature_extractor == "ORB":
+        elif extractor_name == "ORB":
             detector = cv2.ORB_create(nfeatures=max_keypoints)
         else:
             return folder_wd_pb2.Envelope()
@@ -103,32 +232,23 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             keypoints_list.append(cv2.KeyPoint_convert(kps))
             descriptors_list.append(desc)
 
-        # Pack into tensors
-        keypoints_tensor = pad_and_stack(keypoints_list, pad_value=0.0)  # (N, max_K, 2)
-        descriptors_tensor = pad_and_stack(descriptors_list, pad_value=0.0)  # (N, max_D, 128)
+        keypoints_tensor = pad_and_stack(keypoints_list, pad_value=0.0)
+        descriptors_tensor = pad_and_stack(descriptors_list, pad_value=0.0)
 
-        # --- not a pair of images ---
         if len(imgs_in) != 2:
             result = {
                 "keypoints": wrap_value(np_to_bytes(keypoints_tensor)),
                 "descriptors": wrap_value(np_to_bytes(descriptors_tensor))
             }
         else:
-            # --- Two : FLANN + F-matrix ---
             descA, descB = descriptors_list[0], descriptors_list[1]
-
-            if feature_extractor == "SIFT":
-                index_params = dict(algorithm=1, trees=5)
-                search_params = dict(checks=50)
-                flann = cv2.FlannBasedMatcher(index_params, search_params)
+            if extractor_name == "SIFT":
+                flann = cv2.FlannBasedMatcher(dict(algorithm=1, trees=5), dict(checks=50))
             else:
-                index_params = dict(algorithm=6, table_number=6, key_size=12, multi_probe_level=1)
-                search_params = dict(checks=50)
-                flann = cv2.FlannBasedMatcher(index_params, search_params)
+                flann = cv2.FlannBasedMatcher(dict(algorithm=6, table_number=6, key_size=12, multi_probe_level=1), dict(checks=50))
 
             knn_matches = flann.knnMatch(descA, descB, k=2)
             good_matches = [m for m, n in knn_matches if m.distance < ratio_thresh * n.distance]
-            logging.info(f"Good matches after ratio test: {len(good_matches)}")
 
             if len(good_matches) >= 8:
                 ptsA = np.float32([keypoints_list[0][m.queryIdx] for m in good_matches])
@@ -139,21 +259,17 @@ class PipelineService(folder_wd_pb2_grpc.PipelineServiceServicer):
             else:
                 F, inliersA, inliersB = np.zeros((0, 0)), np.zeros((0, 2)), np.zeros((0, 2))
 
-            # Serialize batched tensors
             result = {
                 "keypoints": wrap_value(np_to_bytes(keypoints_tensor)),
-                "descriptors": wrap_value(np_to_bytes(descriptors_tensor)), # overflows gRPC limit
+                "descriptors": wrap_value(np_to_bytes(descriptors_tensor)),
                 "matches_inliers_a": wrap_value(np_to_bytes(inliersA)),
                 "matches_inliers_b": wrap_value(np_to_bytes(inliersB)),
                 "fundamental_matrix": wrap_value(np_to_bytes(F))
             }
 
-        #print size in MB of each result item
-        for k, v in result.items():
-            logging.info(f"{k}: {len(unwrap_value(v)) / (1024 * 1024):.2f} MB")
-
         out_json = {
             "status": "success",
+            "matcher": "FLANN",
             "runtime": time.time() - start_time,
             "timestamp": time.time()
         }

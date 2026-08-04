@@ -51,14 +51,20 @@ RUN addgroup --system ${GROUP} && \
     mkdir ${WORKSPACE} && \
     chown -R ${USER}:${GROUP} ${WORKSPACE}
 
+# Set environment variable before creating user (so Torch uses this path)
+ENV TORCH_HOME=/workspace/.torch_cache
+ENV XDG_CACHE_DIR=/workspace/.xcache
+
 # Install requirements
 COPY requirements.txt .
 RUN apt update -y && \
-    apt install -y pip &&\
+    apt install -y pip git gcc python3-dev libgl1-mesa-glx libglib2.0-0 &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
+    # Install LightGlue from source for latest features
+    pip install git+https://github.com/cvg/LightGlue.git && \
     rm requirements.txt
 
 # COPY .proto file to root to meet ai4eu specifications
