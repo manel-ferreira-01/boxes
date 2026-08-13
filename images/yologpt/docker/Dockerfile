@@ -48,10 +48,10 @@ RUN addgroup --system ${GROUP} && \
     chown -R ${USER}:${GROUP} ${WORKSPACE}
 # Install OS dependencies
 #RUN apt-get update && apt-get install -y \
-#    libgl1-mesa-glx \
+#    libgl1 \
 #    libglib2.0-0 \
 #    && rm -rf /var/lib/apt/lists/*
-RUN apt update && apt install -y   libgl1-mesa-glx libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y   libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
     pip install grpcio grpcio-reflection  lap

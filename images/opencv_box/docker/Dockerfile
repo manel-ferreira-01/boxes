@@ -58,7 +58,7 @@ ENV XDG_CACHE_DIR=/workspace/.xcache
 # Install requirements
 COPY requirements.txt .
 RUN apt update -y && \
-    apt install -y pip git gcc python3-dev libgl1-mesa-glx libglib2.0-0 &&\
+    apt install -y pip git gcc python3-dev libgl1 libglib2.0-0 &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \

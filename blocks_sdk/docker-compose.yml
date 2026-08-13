@@ -1,0 +1,22 @@
+services:
+  tapnext-service:
+    build:
+      context: ../images/tapnext_tracker
+      dockerfile: docker/Dockerfile
+      args:
+        SERVICE_NAME: tapnext
+    ports:
+      - "8061:8061"
+  
+  yolo-service:
+    build:
+      context: ../images/yologpt
+      dockerfile: docker/Dockerfile
+      args:
+        SERVICE_NAME: yolo
+    ports:
+      - "8062:8061"
+      
+networks:
+  default:
+    driver: bridge
