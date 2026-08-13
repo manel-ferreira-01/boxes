@@ -236,8 +236,8 @@ cv2 face detection library here
 #### Step 6: Build and Run
 
 ```bash
-cd /home/manuelf/boxes/images/face_detector/docker
-docker build -t my_face_detector .
+cd /home/manuelf/boxes/images/face_detector
+docker build -t my_face_detector -f docker/Dockerfile .
 docker run --rm -it -p 8061:8061 my_face_detector
 ```
 

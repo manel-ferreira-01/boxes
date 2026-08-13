@@ -412,8 +412,8 @@ if __name__ == '__main__':
 ### Build the image:
 
 ```bash
-cd /home/manuelf/boxes/images/my_service/docker
-docker build -t myregistry/my_service:latest .
+cd /home/manuelf/boxes/images/my_service
+docker build -t myregistry/my_service:latest -f docker/Dockerfile .
 ```
 
 ### Push to registry (optional):
