@@ -28,7 +28,7 @@ RUN addgroup --system ${GROUP} && \
 
 COPY requirements.txt .
 RUN apt update -y && \
-    apt install -y pip ffmpeg libsm6 libxext6 git &&\
+    apt install -y curl pip ffmpeg libsm6 libxext6 git &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
@@ -45,7 +45,7 @@ COPY --chown=${USER}:${GROUP} ${SRC} ${WORKSPACE}
 COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/service.py
 
 # Download TAPNext checkpoint (740MB)
-RUN curl -o /workspace/bootstapnext_ckpt.npz https://storage.googleapis.com/dm-tapnet/tapnext/bootstapnext_ckpt.npz 2>/dev/null || echo "Checkpoint download skipped"
+RUN curl -s -S -o /workspace/bootstapnext_ckpt.npz https://storage.googleapis.com/dm-tapnet/tapnext/bootstapnext_ckpt.npz && echo "Checkpoint downloaded successfully" || (echo "Checkpoint download failed: $?" && exit 1)
 
 USER ${USER}
 

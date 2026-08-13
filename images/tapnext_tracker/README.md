@@ -114,19 +114,23 @@ Each frame you send continues from the previous tracking state. No reset flag ne
 
 ### Response Format
 
+Response includes all tracked points and the Tomasi-Kanade observation matrix:
+
 ```json
 {
   "tapnext": {
     "status": "done",
     "runtime": 0.45,
-    "frames_processed": 1
+    "frames_processed": 1,
+    "num_points": 1024
   }
 }
 ```
 
 Response data contains:
-- `tracks`: Float32 array of shape (frame_count, num_points, sequence_len, 2)
-- `visibles`: Float32 array of track visibility logits
+- `tracks`: Float32 array of shape (frame_count, num_points, 2)
+- `visibles`: Float32 array of track visibility logits  
+- `observation_matrix`: Tomasi-Kanade P matrix (2×frames × num_points) for factorization
 
 ## Docker Build Arguments
 

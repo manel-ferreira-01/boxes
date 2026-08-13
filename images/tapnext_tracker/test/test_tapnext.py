@@ -36,9 +36,20 @@ def process_response(response, frame_idx, orig_h, orig_w, frames, out):
         print(f"  Frame {frame_idx}: No tracks data in response")
         return False
     
+    # Check for observation matrix output (Tomasi-Kanade)
+    if response.data and "observation_matrix" in response.data:
+        obs_bytes = aux.unwrap_value(response.data["observation_matrix"])
+        import torch
+        import io as bio
+        P_tensor = torch.load(bio.BytesIO(obs_bytes), weights_only=False)
+        print(f"\n  Observation Matrix (P): {P_tensor.shape}")
+    
     # Deserialize tracks and visibles
     tracks_tensor = bytes_to_tensor(aux.unwrap_value(response.data["tracks"]))
     visibles_tensor = bytes_to_tensor(aux.unwrap_value(response.data["visibles"]))
+    
+    print(f"\n  Tracks tensor: {tracks_tensor.shape}")
+    print(f"  Visibles tensor: {visibles_tensor.shape}")
     
     # Convert to numpy
     tracks_np = tracks_tensor.numpy()  # Shape: (num_frames, num_points, 2)

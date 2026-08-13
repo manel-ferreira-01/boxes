@@ -21,6 +21,35 @@ import cv2
 from tapnet.tapnext.tapnext_torch import TAPNext
 from tapnet.tapnext.tapnext_torch_utils import restore_model_from_jax_checkpoint
 
+
+def build_observation_matrix(tracks_list):
+    """
+    Build Tomasi-Kanade observation matrix P from tracked points.
+    
+    Args:
+        tracks_list: list of [num_points, 2] arrays (y, x coordinates) per frame
+    
+    Returns:
+        P: observation matrix of shape (2 * num_frames, num_points)
+           Row order: [x1..xN, y1..yN] for all frames concatenated
+    """
+    if not tracks_list:
+        return None
+    
+    all_tracks = np.stack(tracks_list)  # [F, N, 2]
+    F, N, _ = all_tracks.shape
+    
+    P = np.zeros((2 * F, N), dtype=np.float32)
+    
+    for f in range(F):
+        y_coords = all_tracks[f, :, 0]  # Y coordinates
+        x_coords = all_tracks[f, :, 1]  # X coordinates
+        
+        P[2*f, :] = x_coords
+        P[2*f + 1, :] = y_coords
+    
+    return P
+
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 _IDLE_TIMEOUT = 120  # seconds
@@ -46,6 +75,9 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         self.next_track_id = 0
         self.frame_counter = 0
         self.initialized = False
+        self.full_tracking_data = []  # Accumulate tracking data across requests for observation matrix
+        self.accumulated_tracks = None  # Accumulate tracks for response (y, x coordinates)
+        self.accumulated_visibles = None  # Accumulate visibles for response
         
         self._loader_thread = threading.Thread(target=self._load_model_async, daemon=True)
         self._loader_thread.start()
@@ -134,9 +166,10 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 return tapnext_pb2.Envelope(
                     config_json=json.dumps({"tapnext": {"status": "error", "error": "No images in data"}})
                 )
-                        
-            all_tracks = []
-            all_visibles = []
+            
+            if self.accumulated_tracks is None:
+                self.accumulated_tracks = []
+                self.accumulated_visibles = []
             
             for img_bytes in image_bytes_list:
                 frame_np = self._decode_image(img_bytes)
@@ -145,20 +178,31 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 
                 tracks, visibles = self._track_frame(frame_np, parameters)
                 if tracks is not None:
-                    all_tracks.append(tracks)
-                    all_visibles.append(visibles)
+                    self.accumulated_tracks.append(tracks)
+                    self.accumulated_visibles.append(visibles)
+                    
+                    # Accumulate for full observation matrix across requests
+                    self.full_tracking_data.append((tracks.copy(), visibles.copy()))
             
             response_data = {}
-            if all_tracks:
-                response_data["tracks"] = wrap_value(self._serialize_tensor(torch.tensor(all_tracks)))
-                response_data["visibles"] = wrap_value(self._serialize_tensor(torch.tensor(all_visibles)))
+            if self.accumulated_tracks:
+                tracks_tensor = torch.stack([torch.from_numpy(t) for t in self.accumulated_tracks])
+                visibles_tensor = torch.stack([torch.from_numpy(v) for v in self.accumulated_visibles])
+                response_data["tracks"] = wrap_value(self._serialize_tensor(tracks_tensor))
+                response_data["visibles"] = wrap_value(self._serialize_tensor(visibles_tensor))
+                
+                # Build observation matrix from full accumulated tracking data
+                P = build_observation_matrix([t for t, _ in self.full_tracking_data])
+                if P is not None:
+                    response_data["observation_matrix"] = wrap_value(self._serialize_tensor(torch.tensor(P)))
             
             return tapnext_pb2.Envelope(
                 config_json=json.dumps({
                     "tapnext": {
                         "status": "done",
-                        "frames_processed": len(all_tracks),
-                        "runtime": time.time() - start_time
+                        "frames_processed": len(self.accumulated_tracks),
+                        "runtime": time.time() - start_time,
+                        "num_points": self.accumulated_tracks[0].shape[0] if self.accumulated_tracks else 0
                     }
                 }),
                 data=response_data
@@ -275,6 +319,9 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         self.next_track_id = 0
         self.frame_counter = 0
         self.initialized = False
+        self.full_tracking_data = []  # Clear accumulated tracking data for observation matrix
+        self.accumulated_tracks = None  # Reset accumulated tracks
+        self.accumulated_visibles = None  # Reset accumulated visibles
         logging.info("Tracking state reset")
 
 
