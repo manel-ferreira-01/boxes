@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
-"""Simple examples of calling services."""
-import sys
-sys.path.insert(0, '/home/manuelf/boxes/blocks_sdk')
+"""Simple example showing package-agnostic blocks_sdk calls."""
+from blocks_sdk import Client, YOLO, TAPNext
 
-from blocks_sdk import TAPNext, YOLO
+# 1. Generic client (Send Envelope, Receive Envelope)
+client = Client("localhost:8062")
 
-# Initialize clients - use localhost:port mappings from docker-compose.yml
-tapnext = TAPNext("localhost:8061")
+print(f"Connected to box at {client.address}")
+
+# Pass image file paths, PIL Images, or NumPy arrays directly!
+# response = client.DetectSequence(images=["sample.jpg"], threshold=0.5)
+# print("Response keys:", list(response.keys()))
+
+# 2. Service wrappers
 yolo = YOLO("localhost:8062")
+tapnext = TAPNext("localhost:8061")
 
-print(f"TAPNext client: {tapnext.address}")
-print(f"YOLO client: {yolo.address}")
-
-# Example usage (replace with actual image bytes):
-# 
-# # Load an image
-# with open("image.jpg", "rb") as f:
-#     img_bytes = f.read()
-#
-# # Call TAPNext to track points
-# response = tapnext.track([img_bytes])
-#
-# # Call YOLO for detection
-# results = yolo.detect([img_bytes], threshold=0.5)
+print("YOLO client initialized:", yolo.address)
+print("TAPNext client initialized:", tapnext.address)

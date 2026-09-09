@@ -2,68 +2,40 @@
 
 ## Quick Start
 
-```bash
-# Ensure services are running
-docker compose up -d
-
-# Run an example script
-python3 examples/simple_example.py
-```
-
-## Initialize Clients
-
-Services run on these ports (from docker-compose.yml):
-- TAPNext: `localhost:8061`
-- YOLO: `localhost:8062`
-- CoTracker: `localhost:8063`
-
 ```python
-from blocks_sdk import TAPNext, YOLO, CoTracker
+from blocks_sdk import Client
 
-tapnext = TAPNext("localhost:8061")
-yolo = YOLO("localhost:8062")
-cotracker = CoTracker("localhost:8063")
+client = Client("localhost:8062")
+
+# Pass image paths, PIL images, NumPy arrays, or bytes directly!
+response = client.DetectSequence(images=["image1.jpg", "image2.png"], threshold=0.5)
+
+# Automatic unwrapping into Python native dict:
+results = response["images"]
+print(f"Received {len(results)} annotated image frames")
 ```
 
-##YOLO Service
+## YOLO Service
 
 Detect objects in images:
 
 ```python
 from blocks_sdk import YOLO
-import cv2
-import numpy as np
 
-yolo = YOLO("localhost:8061")
+yolo = YOLO("localhost:8062")
 
-# Load image as bytes
-with open("image.jpg", "rb") as f:
-    img_bytes = f.read()
+# Pass file paths directly without manual open() / read()
+response = yolo.detect(["image.jpg"], threshold=0.5)
 
-response = yolo.detect([img_bytes], threshold=0.5)
-
-# Get annotated images (bytes)
-from blocks_sdk import helpers
-annotated_images = helpers.unwrap_value(response.data.get("images", []))
-
-# Save results
-for i, annotated_img in enumerate(annotated_images):
-    nparr = np.frombuffer(annotated_img, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    cv2.imwrite(f"result_{i}.jpg", img)
+# Results are already unwrapped as a list of bytes
+annotated_images = response["images"]
 ```
 
 Track objects across frames:
 
 ```python
-# Load multiple frames
-frames = []
-for frame_file in ["frame1.jpg", "frame2.jpg", "frame3.jpg"]:
-    with open(frame_file, "rb") as f:
-        frames.append(f.read())
-
-response = yolo.track(frames, stream_id=0)
-results = helpers.unwrap_value(response.data.get("images", []))
+response = yolo.track(["frame1.jpg", "frame2.jpg", "frame3.jpg"], stream_id=0)
+results = response["images"]
 ```
 
 ## TAPNext Service
@@ -75,24 +47,30 @@ from blocks_sdk import TAPNext
 
 tapnext = TAPNext("localhost:8061")
 
-# Load frames as bytes
-frames = []
-for i in range(5):  # Track first 5 frames
-    with open(f"frame_{i}.jpg", "rb") as f:
-        frames.append(f.read())
+response = tapnext.track(["frame_0.jpg", "frame_1.jpg", "frame_2.jpg"], grid_size=32)
 
-response = tapnext.track(frames, grid_size=32)
-
-# Get tracks and visibles
-from blocks_sdk import helpers
-tracks = helpers.unwrap_value(response.data.get("tracks", []))
-visibles = helpers.unwrap_value(response.data.get("visibles", []))
-
-print(f"Tracked {len(tracks)} frames with {len(visibles[0]) if visibles else 0} points")
+# Direct access to unwrapped output fields
+tracks = response.get("tracks", [])
+visibles = response.get("visibles", [])
 ```
 
 Reset tracking state:
 
 ```python
 tapnext.reset()
+```
+
+## Low-Level Helper Usage
+
+```python
+from blocks_sdk import to_bytes, wrap_envelope, unwrap_envelope
+
+# Convert PIL Image or filepath to bytes package-agnostically
+raw_bytes = to_bytes("image.jpg")
+
+# Build Envelope Protobuf message
+envelope = wrap_envelope(data={"images": [raw_bytes]}, config={"threshold": 0.5})
+
+# Unwrap Envelope Protobuf response to Python dict
+result_dict = unwrap_envelope(envelope)
 ```
