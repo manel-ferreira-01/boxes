@@ -1,58 +1,51 @@
 import concurrent.futures as futures
-import grpc
-import grpc_reflection.v1alpha.reflection as grpc_reflection
+import sys
 import logging
 import os
 import time
-    
+import json
 import io
-import os
+import threading
+
+sys.path.append("./protos")
+import pipeline_pb2
+import pipeline_pb2_grpc
+from aux import wrap_value, unwrap_value
 
 import torch
 import clip
-import torch.nn.functional as F
 from PIL import Image
-
-
-
-from importlib.machinery import SourceFileLoader
-
-clip_pb2 = SourceFileLoader(
-    "clip_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./clip_pb2.py")
-).load_module()
-clip_pb2_grpc = SourceFileLoader(
-    "clip_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./clip_pb2_grpc.py")
-).load_module()
 
 
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
+_IDLE_TIMEOUT = 60  # seconds
 
-def tensor_to_bytes(t: torch.Tensor) -> bytes:
+_DEFAULT_MODEL = "ViT-B/32"
+
+
+def _serialize_tensor(t: torch.Tensor) -> bytes:
     buf = io.BytesIO()
-    torch.save(t.cpu(), buf)
+    torch.save(t.detach().cpu(), buf, pickle_protocol=4)
     return buf.getvalue()
 
-import threading
 
-IDLE_TIMEOUT = 60  # seconds (1 min)
-
-class CLIPService(clip_pb2_grpc.CLIPServiceServicer):
+class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
     def __init__(self):
-        # Always load to CPU first
-        self._model, self._preprocess = clip.load("ViT-B/32", device="cpu",
+        # Always load to CPU first; moved to GPU lazily on request (see below).
+        self._model, self._preprocess = clip.load(_DEFAULT_MODEL, device="cpu",
                                                   download_root="./model")
+        for p in self._model.parameters():
+            p.requires_grad = False
         self._device = "cpu"
-        logging.info("Model loaded on CPU")
+        logging.info("CLIP model loaded on CPU")
 
         self._last_request_time = time.time()
         self._lock = threading.Lock()
 
-        # Background thread to monitor idle time
+        # Background thread to monitor idle time.
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
@@ -61,68 +54,101 @@ class CLIPService(clip_pb2_grpc.CLIPServiceServicer):
             time.sleep(10)  # check every 10s
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > IDLE_TIMEOUT and self._device == "cuda":
+                if idle_time > _IDLE_TIMEOUT and self._device == "cuda":
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
                     self._device = "cpu"
 
-    def Forward(self, request, context):
+    def Process(self, request, context):
+        start_time = time.time()
+
         with self._lock:
             self._last_request_time = time.time()
-
-            # If idle watchdog moved it back to CPU, restore to GPU
+            # If the idle watchdog moved it back to CPU, restore to GPU.
             if self._device == "cpu" and torch.cuda.is_available():
                 logging.info("Request received: moving model to GPU")
-                self._model.to("cpu")
-                self._device = "cpu"
+                self._model.to("cuda")
+                self._device = "cuda"
 
-        # Run inference
-        image_features, text_features, logits_per_image = run_codigo(request, self._model, self._device, self._preprocess)
+        try:
+            if not request.config_json:
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"clip": {"status": "error", "error": "No config JSON"}}))
 
-        response = clip_pb2.CLIPResponse(
-            image_emb=tensor_to_bytes(image_features),
-            text_emb=tensor_to_bytes(text_features),
-            similarity=tensor_to_bytes(torch.tensor(logits_per_image).detach())
-        )
+            config = json.loads(request.config_json)
+            clip_config = config.get("clip", {})
+            parameters = clip_config.get("parameters", {}) or {}
 
-        return response
+            # Stateless box: accept "reset" (client convenience) as a no-op.
+            if clip_config.get("command") == "reset" or parameters.get("reset"):
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"clip": {"status": "done", "action": "reset"}}))
 
+            # parameters.model is accepted for API consistency; the service runs
+            # the model loaded at startup (ViT-B/32). Switching checkpoints would
+            # require re-loading and is intentionally deferred.
+            image_bytes_list = unwrap_value(request.data["images"]) if "images" in request.data else None
+            texts_list = unwrap_value(request.data["texts"]) if "texts" in request.data else None
 
+            if not image_bytes_list:
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"clip": {"status": "empty_request"}}))
+            if not texts_list:
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"clip": {"status": "error", "error": "No texts in data"}}))
 
-def run_codigo(request,model,device, preprocess):
+            image_features, text_features, logits_per_image = self._encode(
+                image_bytes_list, texts_list)
 
-    received_images = []
-    for image_bytes in request.images:
-        image_stream = io.BytesIO(image_bytes)
-        img = Image.open(image_stream).convert("RGB")
-        received_images.append(img)
+            response_data = {
+                "image_emb": wrap_value(_serialize_tensor(image_features)),
+                "text_emb": wrap_value(_serialize_tensor(text_features)),
+                "similarity": wrap_value(_serialize_tensor(logits_per_image)),
+            }
 
+            return pipeline_pb2.Envelope(
+                config_json=json.dumps({
+                    "clip": {
+                        "status": "done",
+                        "runtime": time.time() - start_time,
+                        "num_images": len(image_bytes_list),
+                        "num_texts": len(texts_list),
+                    }
+                }),
+                data=response_data
+            )
 
-    images = torch.stack([preprocess(im) for im in received_images]).to(device)
-    text = clip.tokenize(request.texts).to(device)
+        except Exception as e:
+            logging.exception(f"Error in Process: {e}")
+            return pipeline_pb2.Envelope(
+                config_json=json.dumps({"clip": {"status": "error", "error": str(e)}}))
 
-    with torch.no_grad():
-        image_features = model.encode_image(images)
-        text_features = model.encode_text(text)
-        
-        logits_per_image, logits_per_text = model(images, text)
-        probs = logits_per_image.softmax(dim=-1).cpu().numpy()
+    def _encode(self, image_bytes_list, texts_list):
+        received_images = []
+        for image_bytes in image_bytes_list:
+            img = Image.open(io.BytesIO(bytes(image_bytes))).convert("RGB")
+            received_images.append(img)
 
-    return image_features, text_features, logits_per_image
+        device = self._device
+        images = torch.stack([self._preprocess(im) for im in received_images]).to(device)
+        text = clip.tokenize(list(texts_list)).to(device)
 
-    
+        with torch.no_grad():
+            image_features = self._model.encode_image(images)
+            text_features = self._model.encode_text(text)
+            logits_per_image, _logits_per_text = self._model(images, text)
+
+        return image_features, text_features, logits_per_image
+
 
 def get_port():
-    """
-    Parses the port where the server should listen
-    Exists the program if the environment variable
-    is not an int or the value is not positive
+    """Parse the port where the server should listen.
+
+    Exits the program if the environment variable is not a positive int.
 
     Returns:
-        The port where the server should listen or
-        None if an error occurred
-
+        The port where the server should listen, or None if an error occurred.
     """
     try:
         server_port = int(os.getenv(_PORT_ENV_VAR, _PORT_DEFAULT))
@@ -134,15 +160,10 @@ def get_port():
         logging.exception('Unable to parse port')
         return None
 
+
 def run_server(server):
-    """Run the given server on the port defined
-    by the environment variables or the default port
-    if it is not defined
-
-    Args:
-        server: server to run
-
-    """
+    """Run the given server on the port defined by the environment variables
+    or the default port if it is not defined."""
     port = get_port()
     if not port:
         return
@@ -156,23 +177,29 @@ def run_server(server):
             time.sleep(_ONE_DAY_IN_SECONDS)
     except KeyboardInterrupt:
         server.stop(0)
-        
+
 
 if __name__ == '__main__':
+    import grpc
+    import grpc_reflection.v1alpha.reflection as grpc_reflection
+
     logging.basicConfig(
         format='[ %(levelname)s ] %(asctime)s (%(module)s) %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.INFO)
-    #Create Server and add service
-    server = grpc.server(futures.ThreadPoolExecutor(),
-                         options= [('grpc.max_send_message_length', 512 * 1024 * 1024), 
-                                   ('grpc.max_receive_message_length', 512 * 1024 * 1024)])
-    clip_pb2_grpc.add_CLIPServiceServicer_to_server(
-        CLIPService(), server)
 
-    # Add reflection
+    server = grpc.server(
+        futures.ThreadPoolExecutor(),
+        options=[
+            ('grpc.max_send_message_length', -1),
+            ('grpc.max_receive_message_length', -1),
+        ]
+    )
+
+    pipeline_pb2_grpc.add_PipelineServiceServicer_to_server(PipelineService(), server)
+
     service_names = (
-        clip_pb2.DESCRIPTOR.services_by_name['CLIPService'].full_name,
+        pipeline_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)

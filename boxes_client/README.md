@@ -126,8 +126,8 @@ Decoding order (`[src/boxes_client/decode_util.py](src/boxes_client/decode_util.
 | Box | In scope | Notes |
 |-----|----------|-------|
 | tapnext (`Process`) | ✅ | v1 target; `Box.trace` is sugar over `Box.run` |
-| vggt, yolo, opencv_box, lang_segm (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; extras like yolo `DetectSequence` / opencv `similarity_check` need the box's own proto for `method=` |
-| clip, cotracker, textEmbedding (`Forward`) | ⏸ pending | use `Box.run` after they're migrated to the shared envelope (client needs no changes) |
+| vggt, yolo, opencv_box, lang_segm, clip (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; extras like yolo `DetectSequence` / opencv `similarity_check` need the box's own proto for `method=` |
+| cotracker, textEmbedding (`Forward`) | ⏸ pending | use `Box.run` after they're migrated to the shared envelope (client needs no changes) |
 
 ### Method dispatch caveat
 
@@ -161,6 +161,6 @@ BOX_HOST=localhost:8061 python boxes_client/tests/live_tapnext.py
   calls still work — `info()` just reports `reflection: False`.
 - **Best-effort decoding.** JSON → torch → numpy → raw bytes (see above).
   Nothing raises; you always get a `Result`.
-- **Forward boxes deferred.** clip / cotracker / textEmbedding use bespoke
+- **Forward boxes deferred.** cotracker / textEmbedding use bespoke
   `Forward` messages; they will work through this client with no changes once
-  migrated to the shared envelope.
+  migrated to the shared envelope (clip is already migrated).

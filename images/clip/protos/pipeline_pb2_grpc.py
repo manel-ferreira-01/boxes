@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import clip_pb2 as clip__pb2
+import pipeline_pb2 as pipeline__pb2
 
-GRPC_GENERATED_VERSION = '1.73.1'
+GRPC_GENERATED_VERSION = '1.83.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,15 +18,16 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in clip_pb2_grpc.py depends on'
+        + ' but the generated code in pipeline_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class CLIPServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+class PipelineServiceStub:
+    """Universal service interface
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -34,43 +35,45 @@ class CLIPServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.Forward = channel.unary_unary(
-                '/CLIPService/Forward',
-                request_serializer=clip__pb2.CLIPRequest.SerializeToString,
-                response_deserializer=clip__pb2.CLIPResponse.FromString,
+        self.Process = channel.unary_unary(
+                '/pipeline.PipelineService/Process',
+                request_serializer=pipeline__pb2.Envelope.SerializeToString,
+                response_deserializer=pipeline__pb2.Envelope.FromString,
                 _registered_method=True)
 
 
-class CLIPServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
+class PipelineServiceServicer:
+    """Universal service interface
+    """
 
-    def Forward(self, request, context):
+    def Process(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_CLIPServiceServicer_to_server(servicer, server):
+def add_PipelineServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Forward': grpc.unary_unary_rpc_method_handler(
-                    servicer.Forward,
-                    request_deserializer=clip__pb2.CLIPRequest.FromString,
-                    response_serializer=clip__pb2.CLIPResponse.SerializeToString,
+            'Process': grpc.unary_unary_rpc_method_handler(
+                    servicer.Process,
+                    request_deserializer=pipeline__pb2.Envelope.FromString,
+                    response_serializer=pipeline__pb2.Envelope.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'CLIPService', rpc_method_handlers)
+            'pipeline.PipelineService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('CLIPService', rpc_method_handlers)
+    server.add_registered_method_handlers('pipeline.PipelineService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class CLIPService(object):
-    """Missing associated documentation comment in .proto file."""
+class PipelineService:
+    """Universal service interface
+    """
 
     @staticmethod
-    def Forward(request,
+    def Process(request,
             target,
             options=(),
             channel_credentials=None,
@@ -83,9 +86,9 @@ class CLIPService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/CLIPService/Forward',
-            clip__pb2.CLIPRequest.SerializeToString,
-            clip__pb2.CLIPResponse.FromString,
+            '/pipeline.PipelineService/Process',
+            pipeline__pb2.Envelope.SerializeToString,
+            pipeline__pb2.Envelope.FromString,
             options,
             channel_credentials,
             insecure,
