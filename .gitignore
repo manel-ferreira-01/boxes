@@ -9,4 +9,5 @@
 .cache/
 output/
 *.MOV
-*.mov
+*.movegg-info/
+*.egg-info/
