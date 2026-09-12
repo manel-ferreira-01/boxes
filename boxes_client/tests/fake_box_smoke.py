@@ -28,7 +28,7 @@ import grpc_reflection.v1alpha.reflection as grpc_reflection
 import torch
 
 from boxes_client._pb_loader import get as _get_pb
-from boxes_client import Box
+from boxes_client import Box, trace
 
 
 pb2, pb2_grpc, aux = _get_pb()
@@ -113,7 +113,7 @@ def main() -> int:
             assert info["reachable"], f"info: {info}"
             assert info["reflection"], f"info: {info}"
             frames = [b"jpeg-frame-%d" % i for i in range(4)]
-            res = b.trace(images=frames, grid_size=10)
+            res = trace(b, images=frames, grid_size=10)
             assert res.config.get("tapnext", {}).get("status") == "done"
             assert res.tracks.shape == (4, 16, 2), res.tracks.shape
             assert res.visibles.shape == (4, 16)

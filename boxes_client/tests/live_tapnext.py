@@ -8,7 +8,8 @@ Start a tapnext box on ``localhost:8061`` (or set ``BOX_HOST``), then:
 It loads a handful of frames from the bundled ``apple.mp4`` and drives the box
 two ways, to prove both call paths:
 
-  * ``Box.trace(...)``  -- the tapnext *convenience* (images -> tracks).
+  * ``trace(box, ...)`` -- the tapnext *convenience* (images -> tracks), an
+                           optional layer over the generic API.
   * ``Box.run(...)``    -- the *generic* API (explicit data/config/method),
                            called by hand with the very same envelope.
 
@@ -24,7 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import numpy as np
 
-from boxes_client import Box  # noqa: E402
+from boxes_client import Box, trace  # noqa: E402
 
 
 def frames_from_video(path, n=4):
@@ -113,7 +114,7 @@ def main():
     jpeg_frames = [encode_jpeg(f) for f in frames]
 
     ok = 0
-    with Box(host) as b:
+    with Box(host, config_key="tapnext") as b:
         print("\n-- Box.info() --")
         info = b.info()
         print(info)
@@ -123,9 +124,9 @@ def main():
         if not info.get("reflection"):
             print("   (box does not expose reflection; continuing anyway)")
 
-        # --------------------------------------------------------- Box.trace()
-        print("\n-- Box.trace()  [convenience: images -> tracks] --")
-        res_trace = b.trace(images=jpeg_frames, grid_size=30)
+        # --------------------------------------------------- trace(box, ...)
+        print("\n-- trace(box, ...)  [convenience: images -> tracks] --")
+        res_trace = trace(b, images=jpeg_frames, grid_size=30)
         if _show("trace", res_trace, expect_frames=len(jpeg_frames)):
             ok += 1
 

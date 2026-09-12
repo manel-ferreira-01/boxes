@@ -7,18 +7,19 @@ this client at any one by address and send an ``Envelope``::
     from boxes_client import Box
     b = Box("localhost:8061")            # local box   ("10.0.0.5:8061" for remote)
 
-    # image box (tapnext) -- one-liner
-    res = b.trace(images=["frame.jpg"])
-    print(res.tracks, res.visibles)
-
-    # generic box -- data + config dicts
+    # any box -- generic, box-agnostic (data + config dicts)
     res = b.run(data={"sentences": ["hello", "world"]},
-                config={"sentences": {"command": "track"}})
+                config={"my_box": {"command": "do_thing"}})
 
-No registry, no central server: the client connects directly to the box.
-Local and remote boxes are the same call -- just change the address. Boxes
-staying on bespoke ``Forward`` messages (clip / cotracker / textEmbedding,
-pending migration) are not yet in scope.
+The core (``Box`` / ``Result`` / envelope builders) knows **no box**.  There is
+also an *optional convenience layer* for specific boxes -- e.g. the tapnext
+point-tracking one-liner -- kept separate on purpose::
+
+    from boxes_client import trace                      # optional, tapnext-only
+    res = trace(b, images=["frame.jpg"], grid_size=30)
+
+No registry, no central server: the client connects directly to the box. Local
+and remote boxes are the same call -- just change the address.
 """
 
 import os as _os
@@ -33,6 +34,7 @@ if _os.path.isdir(_PB_DIR) and _PB_DIR not in _sys.path:
 from .box import Box
 from .result import Result
 from .envelope import load
+from .conveniences import trace  # optional, convenience layer (not core)
 
-__all__ = ["Box", "Result", "load"]
+__all__ = ["Box", "Result", "load", "trace"]
 __version__ = "0.1.0"

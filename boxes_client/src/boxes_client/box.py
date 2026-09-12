@@ -8,18 +8,21 @@ Local and remote boxes are identical: ``Box("localhost:8061")`` vs
 the box directly (boxes are push-style servers), which preserves the
 distributed nature of the fleet.
 
-Two call levels
+The core stays **box-agnostic**: it knows how to build and send an ``Envelope``
+and read a ``Result`` back, but it knows no box, field, or model.  Box-specific
+conveniences (one per box, e.g. a point-tracking helper) live in
+:mod:`boxes_client.conveniences`, are built purely on top of :meth:`Box.run`,
+and are never imported by the core.
 
---------------
-:func:`Box.run`    -- the generic workhorse: ``run(data=..., config=..., method="Process")``.
+Core call surface
+-----------------
+:meth:`Box.run`    -- the generic workhorse: ``run(data=..., config=..., method="Process")``.
                       No assumption about field names or payload types.
-
-:func:`Box.trace`  -- convenience for the tapnext *image* box:
-                      ``trace(images=[...], grid_size=30)`` is sugar over
-                      ``run(data={"images": [...]}, config={"tapnext": {
-                      "command":"track", "parameters":{"grid_size":30}}},
-                     method="Process")``.
+:meth:`Box.reset`  -- clear server-side state (``{"<box>": {"command": "reset"}}``).
+:meth:`Box.call`   -- send an already-built ``Envelope`` via ``Process``.
+:meth:`Box.info`   -- reachability + gRPC-reflection self-description probe.
 """
+
 
 from typing import Any, Dict, List, Optional, Union
 
@@ -45,9 +48,11 @@ class Box:
     timeout:
         Per-RPC timeout in seconds (default 600).
     config_key:
-        Top-level key used by the :meth:`reset` / :meth:`trace` conveniences
-        (default ``"tapnext"``). For :meth:`run` this is irrelevant -- you pass
-        the full ``config`` dict yourself.
+        Optional name of the box's config section. Needed only by
+        :meth:`reset` (and ``run(reset_first=True)``) so it knows which section
+        to reset. The generic :meth:`run` does not need it -- you pass the full
+        ``config`` dict yourself. Defaults to ``None``: the core assumes no box.
+        Pass e.g. ``config_key="tapnext"`` when you will reset a stateful box.
     """
 
     def __init__(
@@ -55,7 +60,7 @@ class Box:
         address: str,
         port: Optional[int] = None,
         timeout: float = 600,
-        config_key: str = "tapnext",
+        config_key: Optional[str] = None,
     ):
         self.host, self.port = _split_address(address, port)
         self.timeout = timeout
@@ -172,44 +177,20 @@ class Box:
             self.reset()
         return self._send(_env.build(data, config), method)
 
-    def reset(self) -> Result:
+    def reset(self, config_key: Optional[str] = None) -> Result:
         """Best-effort clear of server-side state.
 
-        Sends a config-only ``Process`` call with ``{config_key: {"command":
-        "reset"}}``. tapnext-style boxes treat this as a hard state reset;
-        boxes that don't recognize the command will typically ignore it.
+        Sends a config-only ``Process`` call with ``{key: {"command": "reset"}}``
+        where ``key`` is ``config_key`` (if given) or the box's ``config_key``
+        from the constructor. Boxes treat it as a hard state reset; boxes that
+        don't recognize the command typically ignore it.
         """
-        return self._send(_env.reset_envelope(self.config_key), "Process")
-
-    def trace(
-        self,
-        images: Union[str, bytes, "pathlib.PurePath", List],
-        grid_size: Optional[int] = None,
-        reset_first: bool = True,
-        **params: Any,
-    ) -> Result:
-        """Convenience for an image-box (tapnext).
-
-        Builds ``data={"images": [bytes,...]}`` and
-        ``config={"tapnext": {"command": "track", "parameters": {...}}}``, then
-        :meth:`run`s it via ``Process``. ``images`` may be a single local
-        path / preencoded bytes, or a list of either.
-        """
-        images_bytes = _env._load_images(images)
-        if not images_bytes:
-            raise ValueError("trace(): no images provided")
-
-        parameters: Dict[str, Any] = dict(params or {})
-        if grid_size is not None:
-            parameters["grid_size"] = int(grid_size)
-
-        return self.run(
-            data={"images": images_bytes},
-            config={self.config_key: {"command": "track",
-                                       "parameters": parameters}},
-            method="Process",
-            reset_first=reset_first,
-        )
+        key = config_key or self.config_key
+        if not key:
+            raise ValueError(
+                "Box.reset(): no config_key given. Construct the Box with "
+                "config_key=<box> or call Box.reset(config_key=<box>).")
+        return self._send(_env.reset_envelope(key), "Process")
 
     # Back-compat alias: low-level "I already built the Envelope" call.
     def call(self, envelope: Any) -> Result:

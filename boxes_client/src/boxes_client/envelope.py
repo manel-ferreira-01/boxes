@@ -77,11 +77,12 @@ def build(data: Optional[Dict[str, Any]] = None,
 
 
 def _load_images(images: Union[str, bytes, Sequence]) -> List[bytes]:
-    """Normalize the ``images`` argument of :meth:`Box.trace` into a list of bytes.
+    """Normalize an ``images`` argument into a list of bytes.
 
-    ``trace`` is the *image-box* convenience, so a bare ``str`` here is treated
-    as a **local file path** to serialize (distinct from the generic ``run``
-    contract where ``str`` means a literal string). Accepts:
+    Used by the image-box conveniences (:mod:`boxes_client.conveniences`), so a
+    bare ``str`` here is treated as a **local file path** to serialize (distinct
+    from the generic ``run`` contract where ``str`` means a literal string).
+    Accepts:
 
     * a single path (str) or preencoded bytes
     * a list of paths / preencoded bytes
@@ -105,6 +106,10 @@ def _load_images(images: Union[str, bytes, Sequence]) -> List[bytes]:
     return out
 
 
-def reset_envelope(config_key: str = "tapnext"):
-    """Build the ``Process`` request that clears server-side tracking state."""
+def reset_envelope(config_key: str):
+    """Build a config-only ``Process`` request that clears server-side state.
+
+    ``config_key`` names the box's config section (e.g. ``"tapnext"``,
+    ``"clip"``); the caller decides -- the core has no default and names no box.
+    """
     return build(config={config_key: {"command": "reset"}})

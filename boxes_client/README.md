@@ -19,10 +19,18 @@ from boxes_client import Box
 b = Box("localhost:8061")                 # a local box
 # b = Box("10.0.0.5:8061")                # ...or a remote one
 
-res = b.trace(images=["frame.jpg"], grid_size=30)
-print(res.tracks)      # [n_frames, n_points, 2]  (y, x) -- if torch is installed
-print(res.visibles)    # [n_frames, n_points]
-print(res.config)      # parsed config_json
+res = b.run(data={"images": ["frame.jpg"]},
+            config={"my_box": {"command": "do_thing", "parameters": {}}})
+print(res.fields)     # decoded payload, whatever the box returned
+print(res.config)     # parsed config_json
+```
+
+Box-specific one-liners live in an *optional* convenience layer, e.g. the
+tapnext tracker:
+
+```python
+from boxes_client import trace
+res = trace(b, images=["frame.jpg"], grid_size=30)
 ```
 
 No registry, no central server — the client connects directly to the box, so
@@ -41,7 +49,11 @@ pip install -e "boxes_client[torch]"
 Without `torch`, tensor fields are returned as raw `bytes` (still usable —
 `torch.load(BytesIO(res.tracks), weights_only=False)`).
 
-## Two call levels
+## Core API (box-agnostic) + optional conveniences
+
+`Box` is deliberately box-agnostic: it builds and sends an `Envelope` and reads
+a `Result` back, and knows **no box, field, or model**. Per-box sugar lives in a
+separate convenience layer, so adding one never touches the core.
 
 ### 1. Generic — `Box.run(data, config, method, reset_first)`
 The workhorse. No assumption about field names or payload types:
@@ -49,7 +61,7 @@ The workhorse. No assumption about field names or payload types:
 ```python
 b.run(
     data    = {"images":    [img1, img2]},           # any field names; any types
-    config  = {"tapnext":   {"command": "track", "parameters": {...}}},
+    config  = {"my_box":    {"command": "do_thing", "parameters": {...}}},
     method  = "Process",                              # default; e.g. "similarity_check"
 )
 ```
@@ -57,29 +69,33 @@ b.run(
 `data` is a dict of `field_name -> value`. Values are coerced per the rules
 below and wrapped into the shared `Value` oneof via the vendored `aux.wrap_value`.
 
-### 2. Convenience — `Box.trace(images, grid_size=None, reset_first=True)`
-Sugar for the **tapnext image box** — reads image files (or accepts pre-encoded
-bytes) and calls `run()` with the right shape:
+### 2. Convenience — `trace(box, images, grid_size=None, reset_first=True)`
+An **optional** one-liner for the *tapnext* box, living in
+`boxes_client.conveniences` (not the core). It reads image files (or accepts
+pre-encoded bytes) and just calls `Box.run()` with the right shape:
 
 ```python
 b = Box("localhost:8061")
-res = b.trace(images=["f1.jpg", "f2.jpg", "f3.jpg"], grid_size=30)
+res = trace(b, images=["f1.jpg", "f2.jpg", "f3.jpg"], grid_size=30)
 np.save("tracks.npy", res.tracks.numpy())
 ```
 
-Other convenience wrappers (e.g. `Box.detect` for yolo, `Box.reconstruct` for
-vggt, …) are deferred. Until then, use the generic `run()` for every box.
+The core `Box` knows nothing about tapnext — `trace` *is* the only tapnext
+knowledge, and it's safe to delete without touching the generic client. Add a
+sibling convenience (`segment`, `embed`, `detect`, …) for other boxes the same
+way; never put a box name in `box.py`.
 
-### `Box.reset()`
-Sends `{config_key: {"command": "reset"}}` on `Process`. tapnext-style boxes
-clear state (used automatically by `trace(reset_first=True)`); other boxes
-typically ignore it.
+### `Box.reset(config_key=None)`
+Sends `{config_key: {"command": "reset"}}` on `Process`. `config_key` is the
+box's section name (or the one from the constructor). Stateful boxes clear
+state; stateless boxes typically ignore it. Pass the box name explicitly, or
+construct with `Box(host, config_key="tapnext")`.
 
 ### `Box.info()`
 Asks the box (via gRPC reflection) whether it serves `pipeline.PipelineService`.
 Useful to check box reachability and shape before committing to a call.
 
-## Value coercion (for `Box.run` / `Box.trace` `data` values)
+## Value coercion (for `Box.run` / convenience `data` values)
 
 | You pass | What's sent |
 |---|---|
@@ -125,7 +141,7 @@ Decoding order (`[src/boxes_client/decode_util.py](src/boxes_client/decode_util.
 
 | Box | In scope | Notes |
 |-----|----------|-------|
-| tapnext (`Process`) | ✅ | v1 target; `Box.trace` is sugar over `Box.run` |
+| tapnext (`Process`) | ✅ | v1 target; `trace(box, ...)` convenience over `Box.run` |
 | vggt, yolo, opencv_box, lang_segm, clip (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; extras like yolo `DetectSequence` / opencv `similarity_check` need the box's own proto for `method=` |
 | cotracker, textEmbedding (`Forward`) | ⏸ pending | use `Box.run` after they're migrated to the shared envelope (client needs no changes) |
 
