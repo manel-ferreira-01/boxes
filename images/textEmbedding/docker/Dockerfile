@@ -1,11 +1,9 @@
 # Define workdir folder for all stages
 # Must be renewed in the beggining of each stage
 ARG WORKSPACE=/workspace
-# This argument will be used to identify the
-# proto file as well as the python file with the server
-# The proto file should have the name ${SERVICE_NAME}.proto
+# All boxes share the same proto file: pipeline.proto
 # The python file should have the name ${SERVICE_NAME}_service.py
-ARG SERVICE_NAME=simplebox
+ARG SERVICE_NAME=sbert
 
 
 # --------------------------------------
@@ -28,8 +26,8 @@ COPY ${PROTOS_FOLDER_DIR} ${WORKSPACE}/
 #COPY image_generic.proto ${WORKSPACE}/
 WORKDIR ${WORKSPACE}
 
-# Compile proto file and remove it
-RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. ${SERVICE_NAME}.proto
+# Compile the shared proto file
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. pipeline.proto
 
 
 # -----------------------------
@@ -65,15 +63,13 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
     rm requirements.txt
 
-# COPY .proto file to root to meet ai4eu specifications
-COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/${SERVICE_NAME}.proto /
+# COPY the shared .proto file to root to meet ai4eu specifications
+COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/pipeline.proto /
 
-# Copy generated .py files to workspace
+# Copy generated .py files (pipeline_pb2.py, pipeline_pb2_grpc.py, aux.py) to workspace
 COPY --from=builder --chown=${USER}:${GROUP} ${WORKSPACE}/*.py ${WORKSPACE}/
 
-# Copy the service file and the utils to workspace
-# (rename service file to only service.py for generic usage)
-COPY --chown=${USER}:${GROUP} ${SRC} ${WORKSPACE}
+# Copy the service file and rename it to service.py for generic usage
 COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/service.py
 
 # Change to non-privileged user

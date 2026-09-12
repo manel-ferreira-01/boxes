@@ -1,4 +1,4 @@
-# VGGT gRPC Docker integration
+# SBERT gRPC Docker integration
 
 
 ## Overview
@@ -13,7 +13,7 @@ Also, it is already built with the necessary sources for the gRPC service to run
 In order to use the images, execute the following command:
 
 ```shell
-$ docker run --rm -it -p 8061:8061 --mount type=bind,source=<path to optional host directory>,target=/workspace/external vggtGrpc 
+$ docker run --rm --gpus all -p 8061:8061 -e PORT=8061 sipgisr/textembedding
 ```
 
 NOTE: The `<path to optional host directory>` must be the absolute path to some directory needed to run the service (it is optional).
@@ -21,12 +21,12 @@ NOTE: The `<path to optional host directory>` must be the absolute path to some 
 
 ## Building the image
 
-In this repository, we define multiple gRPC services. Keep or rename the .py and protobuf files to reflect the name of your service (ex replace all simplebox references by the name you chose).
+All boxes share the same proto file (`pipeline.proto`); only the service file
+(`${SERVICE_NAME}_service.py`) differs.
 
-In order to build the image for a specific service, execute the respective command *(from the repository root directory)*:
-
-### SimpleBox Service 
+In order to build the image, execute the respective command *(from the box root
+directory, i.e. this folder's parent)*:
 
 ```shell
-$ docker build --tag sipgisr/name_of_your_service: --build-arg SERVICE_NAME=name_of_your_service -f docker/Dockerfile .
+$ docker build --tag sipgisr/textembedding --build-arg SERVICE_NAME=sbert -f docker/Dockerfile .
 ```

@@ -1,18 +1,124 @@
-# Generate Text Embedding using sentence-transformers
+# SBERT Box (text embeddings)
 
-Box that encodes text strings 
-'''python
+A gRPC box that encodes a list of sentences with sentence-transformers
+(`all-MiniLM-L6-v2` by default) and returns the embeddings plus the
+sentence-similarity matrix.
 
-    # SPECIFIC CODE STARTS HERE
+The box speaks the shared **envelope** interface, so it is addressable through
+`boxes_client` exactly like tapnext / clip:
 
-    text_list=mat_data["text"]
-    list_embeddings = get_embeddings(text_list)
+```python
+service PipelineService {
+  rpc Process( Envelope ) returns ( Envelope );
+}
+```
 
-    # SPECIFIC CODE ENDS HERE
+## Directory structure
 
-    f=io.BytesIO()
-    # WRITE RETURNING DATA
-    savemat(f,{"embeddings":list_embeddings})
+```
+textEmbedding/
+├── docker/
+│   └── Dockerfile
+├── protos/
+│   ├── pipeline.proto         # shared proto (same as every other box)
+│   ├── pipeline_pb2.py        # generated
+│   ├── pipeline_pb2_grpc.py   # generated
+│   └── aux.py                 # wrap_value / unwrap_value helpers
+├── src/
+│   └── sbert_service.py       # PipelineService.Process(Envelope)
+├── test/
+│   └── test_sbert.py          # in-process / remote smoke test
+├── requirements.txt
+└── README.md
+```
 
+## Build
 
-Input .mat file must have one variable "text" and returns a dictionary with key "embeddings" containing the string embeddings
+```bash
+docker build --tag sipgisr/textembedding --build-arg SERVICE_NAME=sbert -f docker/Dockerfile .
+```
+
+The first call lazily downloads the `all-MiniLM-L6-v2` weights (see `HF_HOME` /
+`HF_HUB_CACHE`).
+
+## Run
+
+```bash
+docker run --rm --gpus all -p 8061:8061 -e PORT=8061 sipgisr/textembedding
+```
+
+## Service usage
+
+### Request
+
+One field in `data`, and a small `config`:
+
+- `data["texts"]` -- list of strings.
+- `config["sbert"]["command"]` -- `"encode"` (default) or `"reset"` (no-op,
+  the box is stateless, but `reset_first` from `boxes_client` stays safe).
+
+### Response
+
+`config_json` carries `{sbert:{status, runtime, num_texts}}` and `data` carries
+two `torch.save`-decoded payloads:
+
+| field          | shape                  | description                  |
+|----------------|------------------------|------------------------------|
+| `embeddings`   | `[num_texts, D]`       | sentence embeddings          |
+| `similarities` | `[num_texts, num_texts]` | pairwise cosine similarity |
+
+## Call with boxes_client
+
+```python
+from boxes_client import Box
+
+b = Box("localhost:8061")
+res = b.run(
+    data={
+        "texts": [
+            "o manel comeu um gelado.",
+            "o carro anda rapido",
+            "a bea bebeu agua muito fria",
+        ],
+    },
+    config={"sbert": {"command": "encode"}},
+)
+import torch, io
+emb = torch.load(io.BytesIO(res.embeddings),    weights_only=False)
+sim = torch.load(io.BytesIO(res.similarities),  weights_only=False)
+print(emb.shape, sim.shape)
+```
+
+Or use the vendored protos directly:
+
+```python
+import grpc, json, pipeline_pb2, pipeline_pb2_grpc, aux
+
+channel = grpc.insecure_channel("localhost:8061")
+stub = pipeline_pb2_grpc.PipelineServiceStub(channel)
+
+req = pipeline_pb2.Envelope(
+    config_json=json.dumps({"sbert": {"command": "encode"}}),
+    data={
+        "texts": aux.wrap_value([
+            "o manel comeu um gelado.",
+            "o carro anda rapido",
+        ]),
+    },
+)
+resp = stub.Process(req)
+print(aux.unwrap_value(resp.data["embeddings"]))  # bytes -> torch.load(...)
+```
+
+## Test
+
+A tapnext/clip-style script (no notebook) that builds an `Envelope` with sample
+sentences, calls `Process`, and prints the shape of each returned tensor plus
+the similarity matrix:
+
+```bash
+# server already running at :8061
+python test/test_sbert.py
+# or
+BOX_HOST=10.0.0.5:8061 python test/test_sbert.py
+```

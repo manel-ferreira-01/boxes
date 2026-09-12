@@ -1,59 +1,50 @@
 import concurrent.futures as futures
-import grpc
-import grpc_reflection.v1alpha.reflection as grpc_reflection
+import sys
 import logging
-import inspect
 import os
 import time
-    
+import json
 import io
-from scipy.io import loadmat, savemat
-import numpy as np
+import threading
+
+sys.path.append("./protos")
+import pipeline_pb2
+import pipeline_pb2_grpc
+from aux import wrap_value, unwrap_value
 
 import torch
 from sentence_transformers import SentenceTransformer
-import torch.nn.functional as F
 
-
-
-from importlib.machinery import SourceFileLoader
-sbert_pb2 = SourceFileLoader(
-    "sbert_pb2",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./sbert_pb2.py")
-).load_module()
-sbert_pb2_grpc = SourceFileLoader(
-    "sbert_pb2_grpc",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "./sbert_pb2_grpc.py")
-).load_module()
-
-import os
-from torchvision import transforms as TF
 
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
+_IDLE_TIMEOUT = 60  # seconds
 
-def tensor_to_bytes(t: torch.Tensor) -> bytes:
+
+_DEFAULT_MODEL = "all-MiniLM-L6-v2"
+
+
+def _serialize_tensor(t: torch.Tensor) -> bytes:
     buf = io.BytesIO()
-    torch.save(t.cpu(), buf)
+    torch.save(t.detach().cpu(), buf, pickle_protocol=4)
     return buf.getvalue()
 
-import threading
 
-IDLE_TIMEOUT = 60  # seconds (1 min)
-
-class SBERTService(sbert_pb2_grpc.SBERTServiceServicer):
+class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
     def __init__(self):
-        # Always load to CPU first
-        self._model = SentenceTransformer("all-MiniLM-L6-v2")
+        # Always load to CPU first; moved to GPU lazily on request (see below).
+        self._model = SentenceTransformer(_DEFAULT_MODEL)
+        for p in self._model.parameters():
+            p.requires_grad = False
         self._device = "cpu"
-        logging.info("Model loaded on CPU")
+        logging.info("SBERT model loaded on CPU")
 
         self._last_request_time = time.time()
         self._lock = threading.Lock()
 
-        # Background thread to monitor idle time
+        # Background thread to monitor idle time.
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
@@ -62,56 +53,83 @@ class SBERTService(sbert_pb2_grpc.SBERTServiceServicer):
             time.sleep(10)  # check every 10s
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                if idle_time > IDLE_TIMEOUT and self._device == "cuda":
+                if idle_time > _IDLE_TIMEOUT and self._device == "cuda":
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
                     self._device = "cpu"
 
-    def Forward(self, request, context):
+    def Process(self, request, context):
+        start_time = time.time()
+
         with self._lock:
             self._last_request_time = time.time()
-
-            # If idle watchdog moved it back to CPU, restore to GPU
+            # If the idle watchdog moved it back to CPU, restore to GPU.
             if self._device == "cpu" and torch.cuda.is_available():
                 logging.info("Request received: moving model to GPU")
                 self._model.to("cuda")
                 self._device = "cuda"
 
-        # Run inference
-        embeddings, similarities = run_codigo(request, self._model, self._device)
+        try:
+            if not request.config_json:
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"sbert": {"status": "error", "error": "No config JSON"}}))
 
-        response = sbert_pb2.SBERTResponse(
-            embeddings=tensor_to_bytes(torch.tensor(embeddings)),
-            similarities=tensor_to_bytes(torch.tensor(similarities))
-        )
+            config = json.loads(request.config_json)
+            sbert_config = config.get("sbert", {})
+            parameters = sbert_config.get("parameters", {}) or {}
 
-        return response
+            # Stateless box: accept "reset" (client convenience) as a no-op.
+            if sbert_config.get("command") == "reset" or parameters.get("reset"):
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"sbert": {"status": "done", "action": "reset"}}))
 
+            texts = unwrap_value(request.data["texts"]) if "texts" in request.data else None
+            if not texts or not isinstance(texts, list) or len(texts) == 0:
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps({"sbert": {"status": "empty_request"}}))
 
+            embeddings, similarities = self._encode(texts)
 
-def run_codigo(request,model,device):
+            response_data = {
+                "embeddings": wrap_value(_serialize_tensor(embeddings)),
+                "similarities": wrap_value(_serialize_tensor(similarities)),
+            }
 
-    sentences = request.sentences # from grpc request this should be a list of strings
+            return pipeline_pb2.Envelope(
+                config_json=json.dumps({
+                    "sbert": {
+                        "status": "done",
+                        "runtime": time.time() - start_time,
+                        "num_texts": len(texts),
+                    }
+                }),
+                data=response_data
+            )
 
-    embeddings = model.encode(sentences)
-    similarities = model.similarity(embeddings, embeddings)
+        except Exception as e:
+            logging.exception(f"Error in Process: {e}")
+            return pipeline_pb2.Envelope(
+                config_json=json.dumps({"sbert": {"status": "error", "error": str(e)}}))
 
+    def _encode(self, texts_list):
+        self._model.to(self._device)
 
-    return embeddings, similarities
+        with torch.no_grad():
+            embeddings = self._model.encode(list(texts_list))
+            embeddings_t = torch.as_tensor(embeddings, dtype=torch.float32).to(self._device)
+            similarities = self._model.similarity(embeddings_t, embeddings_t)
 
-    
+        return embeddings_t, similarities
+
 
 def get_port():
-    """
-    Parses the port where the server should listen
-    Exists the program if the environment variable
-    is not an int or the value is not positive
+    """Parse the port where the server should listen.
+
+    Exits the program if the environment variable is not a positive int.
 
     Returns:
-        The port where the server should listen or
-        None if an error occurred
-
+        The port where the server should listen, or None if an error occurred.
     """
     try:
         server_port = int(os.getenv(_PORT_ENV_VAR, _PORT_DEFAULT))
@@ -123,15 +141,10 @@ def get_port():
         logging.exception('Unable to parse port')
         return None
 
+
 def run_server(server):
-    """Run the given server on the port defined
-    by the environment variables or the default port
-    if it is not defined
-
-    Args:
-        server: server to run
-
-    """
+    """Run the given server on the port defined by the environment variables
+    or the default port if it is not defined."""
     port = get_port()
     if not port:
         return
@@ -145,23 +158,29 @@ def run_server(server):
             time.sleep(_ONE_DAY_IN_SECONDS)
     except KeyboardInterrupt:
         server.stop(0)
-        
+
 
 if __name__ == '__main__':
+    import grpc
+    import grpc_reflection.v1alpha.reflection as grpc_reflection
+
     logging.basicConfig(
         format='[ %(levelname)s ] %(asctime)s (%(module)s) %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.INFO)
-    #Create Server and add service
-    server = grpc.server(futures.ThreadPoolExecutor(),
-                         options= [('grpc.max_send_message_length', 512 * 1024 * 1024), 
-                                   ('grpc.max_receive_message_length', 512 * 1024 * 1024)])
-    sbert_pb2_grpc.add_SBERTServiceServicer_to_server(
-        SBERTService(), server)
 
-    # Add reflection
+    server = grpc.server(
+        futures.ThreadPoolExecutor(),
+        options=[
+            ('grpc.max_send_message_length', -1),
+            ('grpc.max_receive_message_length', -1),
+        ]
+    )
+
+    pipeline_pb2_grpc.add_PipelineServiceServicer_to_server(PipelineService(), server)
+
     service_names = (
-        sbert_pb2.DESCRIPTOR.services_by_name['SBERTService'].full_name,
+        pipeline_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)

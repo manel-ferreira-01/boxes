@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import sbert_pb2 as sbert__pb2
+import pipeline_pb2 as pipeline__pb2
 
-GRPC_GENERATED_VERSION = '1.73.1'
+GRPC_GENERATED_VERSION = '1.83.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,15 +18,16 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in sbert_pb2_grpc.py depends on'
+        + ' but the generated code in pipeline_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class SBERTServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+class PipelineServiceStub:
+    """Universal service interface
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -34,43 +35,45 @@ class SBERTServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.Forward = channel.unary_unary(
-                '/SBERTService/Forward',
-                request_serializer=sbert__pb2.SBERTRequest.SerializeToString,
-                response_deserializer=sbert__pb2.SBERTResponse.FromString,
+        self.Process = channel.unary_unary(
+                '/pipeline.PipelineService/Process',
+                request_serializer=pipeline__pb2.Envelope.SerializeToString,
+                response_deserializer=pipeline__pb2.Envelope.FromString,
                 _registered_method=True)
 
 
-class SBERTServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
+class PipelineServiceServicer:
+    """Universal service interface
+    """
 
-    def Forward(self, request, context):
+    def Process(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_SBERTServiceServicer_to_server(servicer, server):
+def add_PipelineServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Forward': grpc.unary_unary_rpc_method_handler(
-                    servicer.Forward,
-                    request_deserializer=sbert__pb2.SBERTRequest.FromString,
-                    response_serializer=sbert__pb2.SBERTResponse.SerializeToString,
+            'Process': grpc.unary_unary_rpc_method_handler(
+                    servicer.Process,
+                    request_deserializer=pipeline__pb2.Envelope.FromString,
+                    response_serializer=pipeline__pb2.Envelope.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'SBERTService', rpc_method_handlers)
+            'pipeline.PipelineService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('SBERTService', rpc_method_handlers)
+    server.add_registered_method_handlers('pipeline.PipelineService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class SBERTService(object):
-    """Missing associated documentation comment in .proto file."""
+class PipelineService:
+    """Universal service interface
+    """
 
     @staticmethod
-    def Forward(request,
+    def Process(request,
             target,
             options=(),
             channel_credentials=None,
@@ -83,9 +86,9 @@ class SBERTService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/SBERTService/Forward',
-            sbert__pb2.SBERTRequest.SerializeToString,
-            sbert__pb2.SBERTResponse.FromString,
+            '/pipeline.PipelineService/Process',
+            pipeline__pb2.Envelope.SerializeToString,
+            pipeline__pb2.Envelope.FromString,
             options,
             channel_credentials,
             insecure,
