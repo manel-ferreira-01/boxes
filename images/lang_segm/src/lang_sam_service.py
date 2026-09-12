@@ -1,70 +1,96 @@
 import concurrent.futures as futures
-import grpc
-import grpc_reflection.v1alpha.reflection as grpc_reflection
+import io
+import json
 import logging
 import os
-import time
-    
-import io
-import numpy as np
-import json
-import torch
-import traceback
-import zstandard as zstd
-
-# add vggt to the path
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/lang-segment-anything')
-print(sys.path)
+import threading
+import time
+import traceback
 
-from PIL import Image
+import torch
+import zstandard as zstd
 import pickle
 
-from importlib.machinery import SourceFileLoader
-import sys
-sys.path.append("./protos")
-import pipeline_pb2 as lang_sam_pb2
-import pipeline_pb2_grpc as lang_sam_grpc
-from aux import wrap_value, unwrap_value
+from PIL import Image
 
-import threading
+# Make the protos/ folder importable (same pattern as every other box).
+sys.path.append("./protos")
+import pipeline_pb2 as lang_sam_pb2  # noqa: E402
+import pipeline_pb2_grpc as lang_sam_grpc  # noqa: E402
+from aux import wrap_value, unwrap_value  # noqa: E402
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/lang-segment-anything')
+from lang_sam import LangSAM  # noqa: E402
+
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
-IDLE_TIMEOUT = 60  # seconds
+_IDLE_TIMEOUT = 60  # seconds
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/lang-segment-anything')
-from lang_sam import LangSAM
+_DEFAULT_SAM_TYPE = "sam2.1_hiera_small"
+
+# Canonical box key, plus accepted aliases (legacy pipeline configs used
+# "aispgradio" and the flat top-level format when calling this box).
+_BOX_KEYS = ("lang_sam", "lang_segm", "aispgradio")
+
+
+def _encode_results(out_list) -> bytes:
+    """Serialize LangSAM outputs for the Envelope (zstd + pickle).
+
+    Clients decode with: pickle.loads(zstd.ZstdDecompressor().decompress(b))
+    """
+    return zstd.compress(pickle.dumps(out_list))
+
+
+def _decode_config(request):
+    """Parse request.config_json and locate this box's section.
+
+    Returns (box_key, box_config_section) or raises ValueError.
+    """
+    if not request.config_json:
+        raise ValueError("No config JSON")
+
+    config = json.loads(request.config_json)  # may raise JSONDecodeError
+
+    for key in _BOX_KEYS:
+        section = config.get(key)
+        if isinstance(section, dict):
+            return key, section
+
+    # Legacy flat format: {parameters: {...}, text_prompt: [...]}
+    if "parameters" in config or "text_prompt" in config:
+        return "lang_sam", config
+
+    raise ValueError(f"config JSON has no '{'/'' or '.join(_BOX_KEYS)}' section")
+
 
 class PipelineService(lang_sam_grpc.PipelineServiceServicer):
+
     def __init__(self):
-        # Always load to CPU first
-        self._model = LangSAM(sam_type="sam2.1_hiera_small",device="cpu")
+        # Always load to CPU first; moved to GPU lazily on request.
+        self._model = LangSAM(sam_type=_DEFAULT_SAM_TYPE, device="cpu")
         self._device = "cpu"
-        print("Model loaded on CPU")
+        logging.info("LangSAM model loaded on CPU")
+
         self._last_request_time = time.time()
         self._lock = threading.Lock()
+
+        # Background thread to monitor idle time.
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
     def _watchdog_loop(self):
         while True:
-            time.sleep(10)
+            time.sleep(10)  # check every 10s
             with self._lock:
                 idle_time = time.time() - self._last_request_time
-                # Move back to CPU only if currently on GPU
-                if idle_time > IDLE_TIMEOUT and self._device.startswith("cuda"):
+                if idle_time > _IDLE_TIMEOUT and self._device.startswith("cuda"):
                     logging.info("Idle timeout reached: moving model back to CPU")
-                    try:
-                        del self._model
-                        torch.cuda.empty_cache()
-                        self._model = LangSAM(sam_type="sam2.1_hiera_small", device="cpu")
-                        self._device = "cpu"
-                    except Exception as e:
-                        logging.error(f"Failed to move LangSAM back to CPU: {e}")
+                    self.set_device("cpu")
 
-
-    def set_device(self, target: str):
+    def set_device(self, target: str) -> str:
+        """(Re)initialize the LangSAM model on the requested device."""
         with self._lock:
             self._last_request_time = time.time()
             target = target.lower()
@@ -77,85 +103,111 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
 
             try:
                 logging.info(f"Reinitializing model on {target}")
-                # Reinstantiate model fresh on target device
-                new_model = LangSAM(device=target)
-                # Replace old one
+                new_model = LangSAM(sam_type=_DEFAULT_SAM_TYPE, device=target)
                 del self._model
                 torch.cuda.empty_cache()
                 self._model = new_model
                 self._device = target
-            except Exception as e:
-                logging.exception(f"Failed to move model to {target}: {e}")
+            except Exception:
+                logging.exception(f"Failed to move model to {target}")
             return self._device
 
     def Process(self, request, context):
+        """Perform text-guided segmentation on image(s).
 
-        """Perform text-guided segmentation on image(s)."""
-        try:
-            # --- Validate request ---
-            if not request.config_json:
-                return lang_sam_pb2.Envelope()
+        Request:
+            config_json -> {"lang_sam": {"command": "?",
+                                         "parameters": {...},
+                                         "text_prompt": [str, ...]}}
+            data["images"] -> list of image bytes (JPEG/PNG)
 
-            #f"Received config: {request.config_json}")
-            try:
-                config = json.loads(request.config_json)
-            except json.JSONDecodeError:
-                logging.error("config_json is not valid JSON")
-                # it does not need to fail
+        Response:
+            config_json -> {"lang_sam": {"status": "done", "runtime", ...}}
+            data["results"] -> zstd-compressed pickled list (one LangSAM
+                               predict() output dict per input image)
+        """
+        box_key = "lang_sam"
 
-            #logging.error("config parsed")
-            params = config.get("parameters", {}) or {}
-            requested_device = params.get("device", None)
-
-            if requested_device:
-                self.set_device(requested_device)
-            
-            # if there is an json but not images, just return the same json, opencv probably just recovered a frame for ssim
-            if not request.data.get("images", []):
-                return lang_sam_pb2.Envelope(config_json=request.config_json)
-            else:
-                # --- Extract image(s) ---º
-                img_list = unwrap_value(request.data.get("images", []))
-                if not img_list:
-                    logging.error("No images provided in request.data['images']")
-                    return lang_sam_pb2.Envelope()
-            
-            
-            # --- Run inference ---
-            results = self.infer_lang_sam(request)
-
-            # --- Build response ---
-            logging.info("Inference completed, preparing response")
+        def _status(status, **extra):
             return lang_sam_pb2.Envelope(
-                data={"results": wrap_value(zstd.compress(pickle.dumps(results)))},
-                config_json=json.dumps({"status": "ok"})
-            )
+                config_json=json.dumps({box_key: {"status": status, **extra}}))
+
+        start_time = time.time()
+
+        try:
+            box_key, box_cfg = _decode_config(request)
+        except json.JSONDecodeError:
+            logging.error("config_json is not valid JSON")
+            return lang_sam_pb2.Envelope(
+                config_json=json.dumps({"lang_sam": {"status": "error",
+                                                     "error": "config_json is not valid JSON"}}))
+        except ValueError as e:
+            return lang_sam_pb2.Envelope(
+                config_json=json.dumps({"lang_sam": {"status": "error", "error": str(e)}}))
+
+        parameters = box_cfg.get("parameters", {}) or {}
+
+        # Stateless box: accept "reset" (client convenience) as a no-op.
+        if box_cfg.get("command") == "reset" or parameters.get("reset"):
+            return _status("done", action="reset")
+
+        # Device selection (optional).
+        requested_device = parameters.get("device")
+        if requested_device:
+            self.set_device(requested_device)
+
+        # --- Extract image(s) ---
+        if "images" not in request.data:
+            # No payload: some stages (e.g. opencv frame recovery) forward
+            # config-only envelopes in the pipeline. Echo the envelope.
+            return lang_sam_pb2.Envelope(config_json=request.config_json)
+
+        img_list = unwrap_value(request.data["images"])
+        if not img_list:
+            return _status("empty_request")
+
+        # --- Extract text prompts ---
+        text_prompts = box_cfg.get("text_prompt") or parameters.get("text_prompt") or []
+        text_prompts = [str(p) for p in text_prompts]
+        if not text_prompts:
+            return _status("error", error="No text_prompt in config")
+
+        try:
+            # --- Run inference ---
+            received_images = []
+            for image_bytes in img_list:
+                received_images.append(
+                    Image.open(io.BytesIO(bytes(image_bytes))).convert("RGB"))
+
+            # LangSAM pairs one prompt with each image (Grounding-DINO
+            # batches text and images 1:1), so give every image the same
+            # joined prompt.
+            text_prompt_str = ". ".join(text_prompts) + "."
+
+            box_threshold = float(parameters.get("box_threshold", 0.3))
+            text_threshold = float(parameters.get("text_threshold", 0.25))
+
+            out_list = self._model.predict(
+                received_images,
+                [text_prompt_str] * len(received_images),
+                box_threshold, text_threshold)
         except Exception as e:
-            tb = traceback.format_exc()
-            logging.error("[InferLangSAM] Unhandled exception:\n%s", tb)
-            return lang_sam_pb2.Envelope()
+            logging.exception("[lang_sam] inference failed:\n%s", traceback.format_exc())
+            return _status("error", error=str(e))
 
-
-    def infer_lang_sam(self, request): #TODO: make it don't enter the whole request
-
-        # read the images
-        received_images = []
-        for image_bytes in unwrap_value(request.data["images"]):
-            image_stream = io.BytesIO(image_bytes)
-            img = Image.open(image_stream).convert("RGB")
-            #img_np = np.array(img)
-            received_images.append(img)
-
-        #read the text prompts
-        text_prompts = json.loads(request.config_json).get("text_prompt", [])
-        text_prompt_str = ". ".join(text_prompts) + "."
-
-        out_list = []
-        for image in received_images:
-            output = self._model.predict([image], text_prompt_str)
-            out_list.append(output[0]) # testes
-
-        return out_list
+        # --- Build response ---
+        runtime = time.time() - start_time
+        logging.info(f"Inference completed on {len(received_images)} image(s) "
+                     f"in {runtime:.2f}s")
+        return lang_sam_pb2.Envelope(
+            config_json=json.dumps({box_key: {
+                "status": "done",
+                "runtime": runtime,
+                "num_images": len(received_images),
+                "num_prompts": len(text_prompts),
+            }}),
+            data={"results": wrap_value(_encode_results(out_list))}
+        )
 
 
 # ----------------------------------------
@@ -163,15 +215,9 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
 # ----------------------------------------
 
 def get_port():
-    """
-    Parses the port where the server should listen
-    Exists the program if the environment variable
-    is not an int or the value is not positive
+    """Parse the port where the server should listen.
 
-    Returns:
-        The port where the server should listen or
-        None if an error occurred
-
+    Returns the port, or None if invalid.
     """
     try:
         server_port = int(os.getenv(_PORT_ENV_VAR, _PORT_DEFAULT))
@@ -183,15 +229,9 @@ def get_port():
         logging.exception('Unable to parse port')
         return None
 
+
 def run_server(server):
-    """Run the given server on the port defined
-    by the environment variables or the default port
-    if it is not defined
-
-    Args:
-        server: server to run
-
-    """
+    """Run the given server on the port given by the PORT env var or default."""
     port = get_port()
     if not port:
         return
@@ -205,19 +245,26 @@ def run_server(server):
             time.sleep(_ONE_DAY_IN_SECONDS)
     except KeyboardInterrupt:
         server.stop(0)
-        
+
 
 if __name__ == '__main__':
+    import grpc
+    import grpc_reflection.v1alpha.reflection as grpc_reflection
+
     logging.basicConfig(
         format='[ %(levelname)s ] %(asctime)s (%(module)s) %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.INFO)
-    #Create Server and add service
-    server = grpc.server(futures.ThreadPoolExecutor(),
-                         options= [('grpc.max_send_message_length', -1), 
-                                   ('grpc.max_receive_message_length', -1)])
-    lang_sam_grpc.add_PipelineServiceServicer_to_server(
-        PipelineService(), server)
+
+    server = grpc.server(
+        futures.ThreadPoolExecutor(),
+        options=[
+            ('grpc.max_send_message_length', -1),
+            ('grpc.max_receive_message_length', -1),
+        ]
+    )
+
+    lang_sam_grpc.add_PipelineServiceServicer_to_server(PipelineService(), server)
 
     # Add reflection
     service_names = (

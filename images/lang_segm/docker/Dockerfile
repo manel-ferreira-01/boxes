@@ -5,7 +5,7 @@ ARG WORKSPACE=/workspace
 # proto file as well as the python file with the server
 # The proto file should have the name ${SERVICE_NAME}.proto
 # The python file should have the name ${SERVICE_NAME}_service.py
-ARG SERVICE_NAME=simplebox
+ARG SERVICE_NAME=lang_sam
 
 
 # --------------------------------------

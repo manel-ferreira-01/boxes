@@ -8,6 +8,7 @@
 **/*.mp4
 .cache/
 output/
+**/test/output_*.png
 *.MOV
 *.movegg-info/
 *.egg-info/
