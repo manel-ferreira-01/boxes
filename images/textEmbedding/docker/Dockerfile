@@ -34,8 +34,9 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. pipeline.
 # Stage to generate final image
 # -----------------------------
 
-#FROM python:slim-buster
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 
+# Using runtime image instead of devel to reduce size (~4GB savings)
+# Runtime only includes libraries needed to run CUDA apps, not compiler headers
+FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME
@@ -57,9 +58,6 @@ RUN apt update -y && \
     apt install -y pip &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade pip && \
-    # Install headless version of opencv-python for server usage
-    # Does not install graphical modules
-    # See https://github.com/opencv/opencv-python#installation-and-usage
     pip install -r requirements.txt && \
     rm requirements.txt
 
