@@ -1,41 +1,39 @@
-# Documentation Index
+# boxes — documentation
 
-Welcome to the pipeline system documentation.
+A fleet of independent, Dockerized AI inference services ("boxes") speaking one
+shared gRPC envelope, called by `boxes_client` or by orchestration-layer boxes.
 
-## Getting Started
+## Start here
 
-- [Pipeline Architecture Overview](Pipeline_Architecture_Overview.md)
-- [Quick Start Guide](Quick_Start_Guide.md)
+- **[Architecture_Overview](Architecture_Overview.md)** — what a box is, the
+  conventions every box follows, GPU memory lifecycle, what's retired (Maestro).
+- **[Quick_Start_Guide](Quick_Start_Guide.md)** — run a box, call it, build your
+  own from scratch, test it.
+- **[gRPC_Services_Reference](gRPC_Services_Reference.md)** — the envelope
+  contract: `config_json` shape per box, `data` fields, `results` encoding,
+  devices, calling via `boxes_client` or raw stubs.
+- **[Docker_Image_Template_Guide](Docker_Image_Template_Guide.md)** — Dockerfile
+  templates (CPU / CUDA / YOLO) used by the boxes in this repo.
 
-## Core Concepts
+## Boxes in this repo
 
-- [gRPC Services Reference](gRPC_Services_Reference.md)
-- [Pipeline Configuration Reference](Pipeline_Configuration_Reference.md)
+| Box | Type | What it does |
+|-----|------|--------------|
+| clip | GPU | CLIP image/text embeddings |
+| tapnext_tracker | GPU | Point tracking with TAPNext (stateful) |
+| lang_segm | GPU | Text-guided segmentation (LangSAM) |
+| textEmbedding | GPU / CPU | Sentence-BERT text embeddings |
+| vggt | GPU | 3D reconstruction from image sequences |
+| yologpt | GPU | YOLOv11 detection & tracking |
+| opencv_box | GPU / CPU | Optical flow, feature matching, similarity checks |
+| folder_wd | CPU | File-watcher: watches a directory, drives boxes, saves outputs |
+| gradio_display | CPU | Gradio UI: upload/images, drive boxes, display results |
 
-## Templates & Examples
+**The per-box README is the authoritative source for that box's request shape**
+(config keys, fields, status, how to decode `results`):
+[`images/<name>/README.md`](../images/).
 
-- [Docker Image Template Guide](Docker_Image_Template_Guide.md)
+## The client
 
-## Service Examples in /images/
-
-| Service | Type | Description |
-|---------|------|-------------|
-| opencv_box | CPU | Feature matching, optical flow, similarity check |
-| vggt | GPU | 3D reconstruction from multiple images |
-| yologpt | GPU | YOLOv11 detection tracking |
-| cotracker | GPU | Video motion tracking with CoTracker |
-| gradio_display | CPU | Web UI for user interaction |
-| textEmbedding | GPU | Text embeddings |
-
-## Development Workflow
-
-1. **Create service** - Use templates to build a new Docker image
-2. **Test standalone** - Run `docker run` to test your service
-3. **Add to pipeline** - Configure Maestro in /home/manuelf/boxes/pipelines/
-4. **Deploy** - Start complete pipeline with docker-compose
-
-## Need Help?
-
-- Check existing pipelines for examples: /home/manuelf/boxes/pipelines/*/config.yaml
-- Review service code: /home/manuelf/boxes/images/*_service.py
-
+- [`boxes_client/README.md`](../boxes_client/README.md) — the Python client
+  (`Box(ip:port).run(data, config)`), coercion rules, result decoding, `info()`.

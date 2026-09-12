@@ -1,6 +1,8 @@
 # Docker Image Template Guide
 
-This guide provides templates for creating new Docker images to use with the pipeline system.
+Templates for the Docker images used in the boxes fleet. The service-code
+conventions shown here match the boxes in [`../images/`](../images/) — when in
+doubt, read the closest existing box.
 
 ## Directory StructureTemplate
 
@@ -66,10 +68,17 @@ class MyService(pb2_grpc.PipelineServiceServicer):
     
     def Process(self, request, context):
         try:
-            config = json.loads(request.config_json)
-            images = unwrap_value(request.data.get("images", []))
-            
-            results = self.run_inference(images, config)
+            box_cfg = json.loads(request.config_json).get("my_service", {})
+            parameters = box_cfg.get("parameters", {}) or {}
+            if box_cfg.get("command") == "reset":          # accept on every box
+                return pb2.Envelope(config_json=json.dumps(
+                    {"my_service": {"status": "done", "action": "reset"}}))
+            if "images" not in request.data:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"my_service": {"status": "empty_request"}}))
+            images = unwrap_value(request.data["images"])
+
+            results = self.run_inference(images, parameters)
             
             return pb2.Envelope(
                 config_json=json.dumps({"status": "success"}),
@@ -269,8 +278,10 @@ class PipelineService(pb2_grpc.PipelineServiceServicer):
         self.model = YOLO("yolo11n.pt")
     
     def DetectSequence(self, request, context):
-        images = unwrap_value(request.data.get("images", []))
-        
+        if "images" not in request.data:
+            return pb2.Envelope(config_json=json.dumps({"YOLO": "empty_request"}))
+        images = unwrap_value(request.data["images"])
+
         results_list = []
         for img_bytes in images:
             nparr = np.frombuffer(img_bytes, np.uint8)
@@ -293,34 +304,42 @@ class PipelineService(pb2_grpc.PipelineServiceServicer):
 
 ## Helper Functions: aux.py
 
-All services need these:
+Every box vendors **the same** `aux.py` — the canonical copy lives at
+[`protos/aux.py`](../protos/aux.py) in the repo root (each box keeps its own
+copy in `protos/`, copied in at build time). It coerces Python objects to the
+`Value` oneof and back:
 
 ```python
 import pipeline_pb2
 
 def wrap_value(obj):
-    """Convert Python objects to proto Value type"""
-    if isinstance(obj, bytes):
-        return pipeline_pb2.Value(b=obj)
+    """Wrap a Python object into a pipeline.Value"""
+    if isinstance(obj, float):
+        return pipeline_pb2.Value(f=obj)
     elif isinstance(obj, str):
         return pipeline_pb2.Value(s=obj)
-    elif isinstance(obj, float):
-        return pipeline_pb2.Value(f=obj)
-    elif isinstance(obj, list) and all(isinstance(v, bytes) for v in obj):
-        return pipeline_pb2.Value(bb=pipeline_pb2.BytesList(values=obj))
-    raise TypeError(f"Cannot wrap {type(obj)}")
+    elif isinstance(obj, bytes):
+        return pipeline_pb2.Value(b=obj)
 
-def unwrap_value(val):
-    """Convert proto Value to Python object"""
+    elif isinstance(obj, list):
+        if all(isinstance(v, float) for v in obj):
+            return pipeline_pb2.Value(ff=pipeline_pb2.FloatList(values=obj))
+        elif all(isinstance(v, str) for v in obj):
+            return pipeline_pb2.Value(ss=pipeline_pb2.StringList(values=obj))
+        elif all(isinstance(v, (bytes, bytearray)) for v in obj):
+            return pipeline_pb2.Value(bb=pipeline_pb2.BytesList(values=obj))
+    raise TypeError(f"Cannot wrap object of type {type(obj)}: {obj}")
+
+
+def unwrap_value(val: pipeline_pb2.Value):
+    """Unwrap a pipeline.Value into a plain Python object"""
     kind = val.WhichOneof("kind")
-    if kind == "b":
-        return val.b
-    elif kind == "s":
-        return val.s
-    elif kind == "f":
-        return val.f
-    elif kind == "bb":
-        return list(val.bb.values)
+    if kind == "f":   return val.f
+    if kind == "s":   return val.s
+    if kind == "b":   return val.b
+    if kind == "ff":  return list(val.ff.values)
+    if kind == "ss":  return list(val.ss.values)
+    if kind == "bb":  return list(val.bb.values)
     return None
 ```
 
@@ -332,10 +351,12 @@ def unwrap_value(val):
 import concurrent.futures as futures
 import grpc
 import grpc_reflection.v1alpha.reflection as grpc_reflection
+import json
 import logging
 import os
+import pickle
 import time
-import json
+import zstandard as zstd
 
 import sys
 sys.path.append('./protos')
@@ -354,18 +375,29 @@ class MyService(pb2_grpc.PipelineServiceServicer):
     def Process(self, request, context):
         # Implement your logic
         try:
-            config = json.loads(request.config_json)
-            data = unwrap_value(request.data.get("data_field", []))
-            
-            results = self.run_inference(data)
-            
+            box_cfg = json.loads(request.config_json).get("my_service", {})
+            parameters = box_cfg.get("parameters", {}) or {}
+            if box_cfg.get("command") == "reset":
+                return pb2.Envelope(config_json=json.dumps(
+                    {"my_service": {"status": "done", "action": "reset"}}))
+            if "images" not in request.data:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"my_service": {"status": "empty_request"}}))
+            images = unwrap_value(request.data["images"])
+
+            out_list = self.run_inference(images, parameters)
+
+            # Heavy results convention: zstd(pickle(list))
             return pb2.Envelope(
-                config_json=json.dumps({"status": "success"}),
-                data={"results": wrap_value(results)}
+                config_json=json.dumps({"my_service": {"status": "done",
+                                                       "num_images": len(images)}}),
+                data={"results": wrap_value(
+                    zstd.ZstdCompressor().compress(pickle.dumps(out_list)))}
             )
         except Exception as e:
             logging.error(f"Error: {e}")
-            return pb2.Envelope()
+            return pb2.Envelope(config_json=json.dumps(
+                {"my_service": {"status": "error", "error": str(e)}}))
 
 def run_server(server):
     port = int(os.getenv('PORT', _PORT_DEFAULT))
@@ -422,17 +454,20 @@ docker build -t myregistry/my_service:latest -f docker/Dockerfile .
 docker push myregistry/my_service:latest
 ```
 
-### Use in pipeline:
+### Use it from the caller:
 
-Add stage to your config.yaml:
+The box is addressable by `ip:port` — `boxes_client` dials it directly:
 
-```yaml
-kind: stage
-spec:
-  name: my_service_stage
-  method: Process
-  address: my_service:8061
-  pipeline: MyPipeline
+```python
+from boxes_client import Box
+import pathlib
+
+b = Box("localhost:8061")
+res = b.run(
+    data   = {"images": [pathlib.Path("test.jpg")]},
+    config = {"my_service": {"command": "process", "parameters": {}}},
+)
+print(res.config)    # {"my_service": {"status": "done", …}}
 ```
 
 ---

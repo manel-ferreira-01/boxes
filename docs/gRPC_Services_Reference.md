@@ -1,316 +1,230 @@
-# How gRPC Services Work in This System
+# Envelope & Box Contract Reference
 
-## Overview
+How boxes actually speak to each other and to `boxes_client`. This is the
+contract — when you build a box or a client, match **this**, not the historical
+examples.
 
-Each AI service runs as a Docker container exposing a **gRPC server** on port 8061. Services implement the `PipelineService` interface with custom methods.
+## The proto
 
-## Service Interface Standard
-
-### Proto Definition
+Shared by every standard box (canonical copy: [`protos/pipeline.proto`](../protos/pipeline.proto)):
 
 ```protobuf
-syntax = "proto3";
-
-package pipeline;
-
-message Envelope {
-  string config_json = 1;                
-  map<string, Value> data = 2;      
-}
+message FloatList  { repeated float  values = 1; }
+message StringList { repeated string values = 1; }
+message BytesList  { repeated bytes  values = 1; }
 
 message Value {
-  oneof kind { 
-    bytes b       = 1;
-    string s      = 2;
-    float f       = 5;
-    BytesList bb  = 6;
-    StringList ss = 7;
-    FloatList ff  = 10;
+  oneof kind {
+    bytes  b       = 1;   // single blobs (bytes, pickle, torch tensor, …)
+    string s       = 2;
+    float  f       = 5;
+    BytesList  bb  = 6;
+    StringList ss  = 7;
+    FloatList  ff  = 10;
   }
+}
+
+message Envelope {
+  string config_json       = 1;  // JSON string; per-box section
+  map<string, Value> data   = 2; // named payload fields
 }
 
 service PipelineService {
   rpc Process(Envelope) returns (Envelope);
-  // Additional custom methods defined per service
 }
 ```
 
-### Data Types
+`wrap_value` / `unwrap_value` live in [`protos/aux.py`](../protos/aux.py) and
+are vendored into each box at build time. They do exactly two things: coerce
+Python objects (scalar / homogeneous list) into the `Value` oneof and back.
+Use them; don't hand-roll the oneof.
 
-The `Value` type supports:
-- **Scalars:** bytes, string, float
-- **Lists:** BytesList, StringList, FloatList (repeated)
+## `config_json` contract
 
-## Service Implementation Pattern
+`config_json` is always a **JSON object namespaced under the box's key**:
 
-### Basic Structure
-
-```python
-import grpc
-from concurrent import futures
-
-class MyService(<service>_pb2_grpc.<Service>Servicer):
-    def __init__(self):
-        # Load models here (once at startup)
-        self.model = load_model()
-    
-    def <MethodName>(self, request, context):
-        # 1. Parse Envelope
-        config = json.loads(request.config_json)
-        images = unwrap_value(request.data.get("images", []))
-        
-        # 2. Process data
-        results = self.model.infer(images)
-        
-        # 3. Return response
-        return <service>_pb2.Envelope(
-            config_json=json.dumps({"status": "success"}),
-            data={"results": wrap_value(results)}
-        )
-
-# Server setup
-server = grpc.server(futures.ThreadPoolExecutor())
-<service>_pb2_grpc.add_<Service>Servicer_to_server(MyService(), server)
-server.add_insecure_port('[::]:8061')
-server.start()
-server.wait_for_termination()
-```
-
-## Service Method Categories
-
-### 1. Common Methods (PipelineService)
-
-| Method | Purpose |
-|--------|---------|
-| `Process(Envelope)` | Generic processing - accepts Envelope, returns Envelope |
-
-### 2. Custom Methods by Service
-
-#### YOLO (`yologpt`)
-```protobuf
-service PipelineService {
-  rpc DetectSequence(Envelope) returns (Envelope);   # Run detection on batch
-  rpc TrackSequence(Envelope) returns (Envelope);    # Track objects across frames
+```json
+{
+  "lang_sam": {
+    "command": "segment",
+    "parameters": { "box_threshold": 0.3, "text_threshold": 0.25, "device": "cuda:0" },
+    "text_prompt": ["an excavator", "the wood pile"]
+  }
 }
 ```
 
-Usage:
-```python
-# Detection
-response = stub.DetectSequence(
-    Envelope(
-        config_json=json.dumps({"threshold": 0.5}),
-        data={"images": wrap_value([img1_bytes, img2_bytes])}
-    )
-)
+- `command` — what to do. Every standard box accepts `"reset"` (stateless boxes
+  no-op it; tapnext clears its tracker).
+- `parameters` — box-specific knobs (thresholds, grid sizes, `device`, …).
+- Any box-specific top-level fields (e.g. `lang_sam.text_prompt`) sit next to
+  them.
 
-# Tracking
-response = stub.TrackSequence(
-    Envelope(
-        config_json=json.dumps({"stream": 0}),  # stream flag
-        data={"images": wrap_value([frame1, frame2, ...])}
-    )
-)
+### Box key per box
+
+| Box (`images/…`) | Box key | Notes |
+|---|---|---|
+| tapnext_tracker | `tapnext` | stateful — `reset` clears the active tracker |
+| clip | `clip` | stateless |
+| textEmbedding | `sbert` | stateless |
+| lang_segm | `lang_sam` | aliases accepted: `lang_segm`, `aispgradio`, or the legacy flat form |
+| opencv_box | `opencv` | `Process` + `similarity_check` |
+| vggt | flat (`parameters` at top level) | legacy; response uses `VGGT` section |
+| yologpt | flat (`stream`, etc.) | legacy; its own RPCs |
+| folder_wd / gradio_display | mixed (`opencv`, `aispgradio`, …) | orchestration layers, not "standard" boxes |
+
+**Legacy flat form**: boxes written before the convention read
+`config_json` directly (`{"parameters": {...}, "stream": 2}`); `lang_segm`
+deliberately still accepts that shape for old callers. New code should use the
+namespaced form.
+
+## `data` fields
+
+Free-form map; field names are per-box agreements, not proto-level. What every
+box in this repo converges on:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `images` | `BytesList` (list of `b`) | input images, typically JPEG/PNG bytes |
+| `texts` / `sentences` | `StringList` | input text (clip, sbert) |
+| `results` | `b` (single bytes) | **heavy outputs**, see below |
+| `tracks`, `visibles` | `b` | tensor payloads (tapnext: `torch.save`-format bytes, decoded by the client if torch is present) |
+| `glb`, `frames`, … | `b` | box-specific binaries |
+
+### Heavy results: `zstd(compress) + pickle`
+
+For list-shaped results that can't fit in JSON (LangSAM masks, vggt outputs),
+the convention is:
+
+```python
+blob = zstandard.ZstdCompressor().compress(pickle.dumps(out_list))
+# server:
+return Envelope(data={"results": wrap_value(blob)})
+
+# client:
+out_list = pickle.loads(zstandard.ZstdDecompressor().decompress(bytes(blob)))
 ```
 
-#### OpenCV (`opencv_box`)
-```protobuf
-service PipelineService {
-  rpc Process(Envelope) returns (Envelope);           # Generic processing
-  rpc similarity_check(Envelope) returns (Envelope);  # Frame comparison
+LangSAM (`lang_segm`) produces it; `folder_wd` consumes it — that's a real
+cross-box contract. The client decodes it for you in `Result.fields["results"]`
+when `pickle` is importable.
+
+## Response `config_json`
+
+Standard boxes answer `Process` with a namespaced status:
+
+```json
+"lang_sam": {
+  "status": "done",               // done | empty_request | error
+  "runtime": 4.21,                // seconds when available
+  "num_images": 2,
+  "num_prompts": 2
 }
 ```
 
-Usage:
+- **`done`** — success; payload in `data.results`.
+- **`empty_request`** — the `images` field was missing/empty.
+- **`error`** — missing config, no prompt, or inference failure; the human
+  readable reason is in `"error"`.
+- **Config-only echo** — some boxes (opencv, vggt, folder_wd) forward
+  config-only envelopes without images and echo them back unchanged; callers
+  treat an empty `data` as "no work, continue".
+
+## Devices & GPU behaviour (as deployed)
+
+- `parameters.device`: optional string (`"cpu"` / `"cuda"` / `"cuda:0"`).
+  When present it wins explicitly.
+- When absent, GPU boxes use CUDA if visible, else CPU.
+- GPU boxes fall back to CPU after `_IDLE_TIMEOUT` (usually 60 s); the move is
+  in-place on the torch modules and releases the SAM2 predictor's feature
+  cache so `empty_cache()` reclaims VRAM.
+- After the first GPU use, a fixed VRAM floor (~0.9 GB with this stack) is the
+  CUDA context — not a leak.
+
+## Calling a box
+
+### Primary: `boxes_client`
+
 ```python
-# Feature matching between two images
-response = stub.Process(
-    Envelope(
-        config_json=json.dumps({"feature_extractor": "SuperPoint"}),
-        data={"images": wrap_value([img1_bytes, img2_bytes])}
-    )
+from boxes_client import Box
+import pathlib
+
+b = Box("localhost:8061")                 # or 10.0.0.5:8061
+# quick reachability check (uses gRPC reflection)
+print(b.info())
+
+res = b.run(
+    data   = {"images": [pathlib.Path("frame.jpg"), pathlib.Path("frame2.jpg")]},
+    config = {"lang_sam": {
+        "command": "segment",
+        "parameters": {"box_threshold": 0.3, "text_threshold": 0.25},
+        "text_prompt": ["a car", "the road"],
+    }},
+    # method   = "Process",                # default
+    # reset_first = True,                   # sends {"lang_sam": {"command":"reset"}} first
 )
+print(res.config)        # {"lang_sam": {"status": "done", "runtime": …, …}}
+print(res.results)       # decoded: list of LangSAM.out dicts
 ```
 
-#### CoTracker (`cotracker`)
-```protobuf
-service CoTrackerService {
-  rpc Forward(CoTrackerRequest) returns (CoTrackerResponse);
-}
+Client rules (full doc: [`boxes_client/README.md`](../boxes_client/README.md)):
 
-message CoTrackerRequest {
-  bytes video = 1;
-  int32 grid_size = 4;
-}
-```
+- `str` in `data` = **literal** string (not a file). For files, pass
+  `pathlib.Path` or raw `bytes`.
+- Homogeneous lists become `BytesList` / `StringList` / `FloatList`; scalars
+  become `b` / `s` / `f`.
+- `Result.fields` decodes by JSON → torch (if installed) → numpy → raw bytes.
 
-## Helper Functions: wrap_value / unwrap_value
-
-### Purpose
-Convert Python objects to/from protobuf `Value` type.
-
-### Implementation
+### Raw (without the client)
 
 ```python
-def wrap_value(obj):
-    """Wrap Python object into pipeline.Value"""
-    if isinstance(obj, bytes):
-        return Value(b=obj)
-    elif isinstance(obj, str):
-        return Value(s=obj)
-    elif isinstance(obj, float):
-        return Value(f=obj)
-    elif isinstance(obj, list) and all(isinstance(v, bytes) for v in obj):
-        return Value(bb=BytesList(values=obj))
-    # ... more types
-```
+import grpc, json
+import pipeline_pb2, pipeline_pb2_grpc, aux   # vendored from protos/
 
-### Usage Examples
-
-```python
-# Single image (bytes)
-data={"images": wrap_value(image_bytes)}
-
-# Multiple images (list of bytes)
-data={"images": wrap_value([img1, img2, img3])}
-
-# Dictionary metadata
-data={"metadata": wrap_value({"frame": 5, "timestamp": "..."})}
-
-# List of floats
-data={"distances": wrap_value([0.1, 0.5, 0.9])}
-```
-
-### Unwrapping Data
-
-```python
-# Get images from envelope
-images = unwrap_value(request.data.get("images", []))
-
-# Get metadata
-config = json.loads(request.config_json)
-threshold = config.get("threshold", 0.5)
-```
-
-## Service Lifecycle
-
-### 1. startup (once at container start)
-- Load models into memory
-- Initialize CUDA context (if GPU)
-- Set up file watchers or database connections
-
-### 2. Request Handling (repeated)
-```python
-def Process(self, request, context):
-    # Parse input
-    images = unwrap_value(request.data.get("images"))
-    
-    # Run inference
-    results = self.model(images)
-    
-    # Format output
-    return Envelope(data={"predictions": wrap_value(results)})
-```
-
-### 3. shutdown (on container stop)
-- Release GPU memory
-- Save state if needed
-- Cleanup resources
-
-## Error Handling Pattern
-
-```python
-def Process(self, request, context):
-    try:
-        images = unwrap_value(request.data.get("images", []))
-        if not images:
-            raise ValueError("No images provided")
-        
-        results = self.model.infer(images)
-        
-        return Envelope(data={"results": wrap_value(results)})
-    
-    except Exception as e:
-        logging.error(f"Processing failed: {e}")
-        # Return empty envelope to signal failure
-        return Envelope()
-```
-
-## Performance Considerations
-
-### Maximally Flexible Messages
-Services set large message limits:
-
-```python
-server = grpc.server(
-    futures.ThreadPoolExecutor(),
-    options=[
-        ('grpc.max_send_message_length', -1),
-        ('grpc.max_receive_message_length', -1),
-        ('grpc.max_message_length', -1)
-    ]
+stub = pipeline_pb2_grpc.PipelineServiceStub(
+    grpc.insecure_channel("localhost:8061",
+                          options=[("grpc.max_send_message_length", -1),
+                                   ("grpc.max_receive_message_length", -1)]))
+req = pipeline_pb2.Envelope(
+    config_json=json.dumps({"clip": {"command": "encode",
+                                     "parameters": {"model": "ViT-B/32"}}}),
+    data={"images": aux.wrap_value([open("frame.jpg","rb").read()])},
 )
+resp = stub.Process(req)
+print(json.loads(resp.config_json))
 ```
 
-### GPU Memory Management
+## Testing a new box standalone
 
-**Idle timeout pattern:**
-```python
-class MyService(<service>_pb2_grpc.<Service>Servicer):
-    def __init__(self):
-        self._model = load_model_to_gpu()
-        self._last_request_time = time.time()
-        
-        # Watchdog to move back to CPU when idle
-        threading.Thread(target=self._watchdog_loop, daemon=True).start()
-    
-    def _watchdog_loop(self):
-        while True:
-            time.sleep(10)
-            idle = time.time() - self._last_request_time
-            if idle > 60 and self._device.startswith("cuda"):
-                self._model.cpu()  # Free GPU memory
-                torch.cuda.empty_cache()
-    
-    def Process(self, request, context):
-        with self._lock:
-            self._last_request_time = time.time()
-            
-            # Move to GPU if needed
-            if self._device == "cpu" and torch.cuda.is_available():
-                self._model.cuda()
-        
-        return self._run_inference(request)
+```bash
+# 1) build & start
+docker build --tag my_box -f images/<name>/docker/Dockerfile images/<name>/
+docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_box
+
+# 2) smoke test (each box ships one under test/)
+python images/<name>/test/test_<name>.py
+
+# 3) call from the client (fastest sanity check)
+python - <<'PY'
+from boxes_client import Box
+import pathlib
+b = Box("localhost:8061")
+print(b.info())
+print(b.run(data={"images":[pathlib.Path("test.jpg")]},
+            config={"my_box":{"command":"segment","parameters":{}}}).config)
+PY
 ```
 
-## Testing Services
+## Checklist for a *new* standard box
 
-### Standalone (outside pipeline)
-
-```python
-import grpc
-from protos import pipeline_pb2, pipeline_pb2_grpc
-
-channel = grpc.insecure_channel('localhost:8061')
-stub = pipeline_pb2_grpc.PipelineServiceStub(channel)
-
-response = stub.Process(
-    pipeline_pb2.Envelope(
-        config_json='{"param": "value"}',
-        data={"images": wrap_value([test_image_bytes])}
-    )
-)
-
-results = unwrap_value(response.data.get("results", []))
-```
-
-## Summary Checklist
-
-When implementing a new service:
-- [ ] Define `.proto` file with custom methods
-- [ ] Implement Servicer class with all RPC methods
-- [ ] Use `wrap_value()` / `unwrap_value()` for data conversion
-- [ ] Set large message size limits for images/videos
-- [ ] Add idle timeout logic for GPU services
-- [ ] Log errors and return empty Envelope on failure
-- [ ] Test standalone before pipeline integration
+- [ ] `protos/pipeline.proto` copied from `protos/` at the repo root
+- [ ] `aux.py` vendored (wrap/unwrap)
+- [ ] `Process(Envelope) -> Envelope` implemented
+- [ ] `config_json` namespaced under the box key (`{"my_box": {...}}`)
+- [ ] `parameters` read with safe defaults; `command: reset` accepted
+- [ ] `data.images` / `data.texts` / … documented in the box README
+- [ ] Heavy results → `zstd(pickle)` into `data.results`
+- [ ] `status` in `done | empty_request | error`, `error` in JSON on failure
+- [ ] Large message limits set (`-1`), reflection enabled, PORT env respected
+- [ ] GPU boxes: CPU at startup → auto-GPU on request → idle-timeout fallback
+      (+ release of any per-inference caches before `empty_cache()`)
+- [ ] Standalone test under `test/`, and a README with a worked example

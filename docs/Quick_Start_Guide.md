@@ -1,317 +1,231 @@
 # Quick Start Guide
 
-## Prerequisites
+Assumes Docker. `pip install -e boxes_client` for the client (the
+recommended way to talk to any box).
 
-- Docker and Docker Compose installed
-- Python 3.10+ (for local development/testing)
-- Basic understanding of gRPC concepts helpful but not required
+## 1. Run an existing box
 
-## Your Existing Setup
-
-### Images Directory (`/images/`)
-
-Each subdirectory is a complete AI service:
-
-```
-/images/
-├── opencv_box/         # Feature matching, optical flow
-├── vggt/              # 3D reconstruction  
-├── yologpt/           # YOLO detection & tracking
-├── cotracker/         # Video motion tracking
-├── gradio_display/    # Web UI
-└── textEmbedding/     # Text embeddings
-```
-
-### Pipelines Directory (`/pipelines/`)
-
-Pre-configured pipeline examples:
-
-```
-/pipelines/
-├── yolo/               # Simple YOLO detection
-├── vggt/               # 3D reconstruction pipeline
-├── gradio+vggt+yolo/   # Full multi-algorithm pipeline
-└── folder_wd_yolo/     # File-watcher + YOLO
-```
-
-## Run a Pipeline (Using Existing Images)
-
-### Step 1: Pull Images (if not built locally)
+Pick any box from `images/` (each has a README with its exact request shape):
 
 ```bash
-docker pull sipgisr/displaygrpc
-docker pull sipgisr/yologrpc  
-docker pull sipgisr/vggtgrpc
-docker pull sipgisr/maestro:v1-latest
+cd images/lang_segm
+docker build --tag my_lang_segm -f docker/Dockerfile .
+docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_lang_segm
 ```
 
-### Step 2: Choose a Pipeline
-
-For example, the simplest YOLO pipeline:
-
-```yaml
-# /home/manuelf/boxes/pipelines/yolo/config.yaml
-kind: pipeline
-spec:
-  name: Yolo
----
-kind: stage
-spec:
-  name: yolo_detect
-  method: AllProcessing
-  address: yologrpc:8061
-  pipeline: Yolo
----
-kind: stage
-spec:
-  name: gradio-source
-  method: acquire
-  address: interface:8061
-  pipeline: Yolo
----
-kind: stage
-spec:
-  name: gradio-display
-  method: display
-  address: interface:8061
-  pipeline: Yolo
----
-# (links continue...)
-```
-
-### Step 3: Run with Docker Compose
+Every box listens on **8061** (AI4EU spec), so running several at once means
+mapping each container to a different host port:
 
 ```bash
-cd /home/manuelf/boxes/pipelines/yolo
-
-docker-compose up -d
+docker run -d -p 9061:8061 ...   # lang_segm on host :9061
+docker run -d -p 9062:8061 ...   # clip on     host :9062
 ```
 
-### Step 4: Access the Interface
-
-- Open browser to `http://localhost:7860`
-- Upload images for detection
-- See results annotated with bounding boxes
-
-## Build a Custom Image (For Your Own AI Service)
-
-### Scenario: Create a new face detection service
-
-#### Step 1: Create Directory Structure
-
-```bash
-mkdir -p /home/manuelf/boxes/images/face_detector/{protos,src,docker}
-```
-
-#### Step 2: Write Protobuf Definition
-
-Create `/home/manuelf/boxes/images/face_detector/protos/pipeline.proto`:
-
-```protobuf
-syntax = "proto3";
-
-package pipeline;
-
-message Envelope {
-  string config_json = 1;
-  map<string, Value> data = 2;
-}
-
-message Value {
-  oneof kind { 
-    bytes b       = 1;
-    string s      = 2;
-    float f       = 5;
-  }
-}
-
-service PipelineService {
-  rpc DetectFaces(Envelope) returns (Envelope);
-}
-```
-
-#### Step 3: Generate gRPC Code
-
-```bash
-cd /home/manuelf/boxes/images/face_detector/protos
-python -m grpc_tools.protoc \
-    --python_out=. \
-    --grpc_python_out=. \
-    pipeline.proto
-```
-
-#### Step 4: Write the Service
-
-Create `/home/manuelf/boxes/images/face_detector/src/face_service.py`:
+## 2. Call it
 
 ```python
-import sys
-sys.path.append('./protos')
-import pipeline_pb2 as pb2
-import pipeline_pb2_grpc as pb2_grpc
+from boxes_client import Box
+import pathlib
+
+b = Box("localhost:8061")
+print(b.info())   # reachability + reflection check
+res = b.run(
+    data   = {"images": [pathlib.Path("dog.jpg")]},
+    config = {"lang_sam": {
+        "command": "segment",
+        "parameters": {"box_threshold": 0.3, "text_threshold": 0.25},
+        "text_prompt": ["a dog"],
+    }},
+)
+print(res.config)   # {"lang_sam": {"status": "done", "runtime": …, …}}
+print(res)          # fields are best-effort decoded (JSON→torch→numpy→bytes)
+```
+
+Every box also ships a `test/test_*.py` smoke test you can point at a running
+box:
+
+```bash
+python images/lang_segm/test/test_lang_sam.py
+BOX_HOST=10.0.0.5:9061 python images/lang_segm/test/test_lang_sam.py
+```
+
+## 3. Build a box of your own
+
+### 3.1 Laying out
+
+```
+images/<name>/
+├── protos/            # pipeline.proto + aux.py, from the repo root protos/
+├── src/<name>_service.py
+├── docker/Dockerfile
+├── test/test_<name>.py
+├── requirements.txt
+└── README.md          # request/response reference — required
+```
+
+```bash
+mkdir -p images/<name>/{protos,src,docker,test}
+cp protos/pipeline.proto images/<name>/protos/
+cp protos/aux.py         images/<name>/protos/
+```
+
+### 3.2 The service (the standard pattern)
+
+`images/<name>/src/<name>_service.py` — CPU-at-start, auto-GPU on request,
+idle fallback to CPU. `tapnext`/`clip`/`lang_segm` follow this shape.
+
+```python
+import concurrent.futures as futures
+import grpc, json, logging, os, sys, threading, time
+import torch
+sys.path.append("./protos")
+import pipeline_pb2, pipeline_pb2_grpc
 from aux import wrap_value, unwrap_value
 
-class FaceService(pb2_grpc.PipelineServiceServicer):
+_IDLE_TIMEOUT = 60  # seconds
+
+class Box(pb2_grpc.PipelineServiceServicer):
     def __init__(self):
-        # Load face detection model
-        self.model = load_face_detector_model()
-    
-    def DetectFaces(self, request, context):
-        images = unwrap_value(request.data.get("images", []))
-        
-        results = []
-        for img_bytes in images:
-            faces = self.model.detect(img_bytes)
-            results.append(faces)
-        
-        return pb2.Envelope(
-            config_json='{"status": "success"}',
-            data={"faces": wrap_value(results)}
-        )
+        self._model = load_model(device="cpu")          # CPU first: fast start, no VRAM
+        self._device = "cpu"
+        self._last_request_time = time.time()
+        self._lock = threading.Lock()
+        threading.Thread(target=self._watchdog_loop, daemon=True).start()
+
+    def _watchdog_loop(self):
+        while True:
+            time.sleep(10)
+            with self._lock:
+                if time.time() - self._last_request_time > _IDLE_TIMEOUT \
+                        and self._device.startswith("cuda"):
+                    self._move_unlocked("cpu")
+
+    def _move_unlocked(self, target):
+        with self._lock:
+            ...  # self._model.to(target); self._device = target; torch.cuda.empty_cache()
+
+    def Process(self, request, context):
+        try:
+            cfg = json.loads(request.config_json)
+            box_cfg = cfg.get("my_box", {})                       # ← your box key
+            if box_cfg.get("command") == "reset":                 # always accept
+                return pipeline_pb2.Envelope(config_json=json.dumps(
+                    {"my_box": {"status": "done", "action": "reset"}}))
+
+            parameters = box_cfg.get("parameters", {}) or {}
+            images = unwrap_value(request.data["images"]) if "images" in request.data else None
+            if not images:
+                return pipeline_pb2.Envelope(config_json=json.dumps(
+                    {"my_box": {"status": "empty_request"}}))
+
+            with self._lock:                                      # auto-GPU, matches clip/sbert/lang_segm
+                self._last_request_time = time.time()
+                target = (parameters.get("device") or "").lower()
+                if not target and torch.cuda.is_available():
+                    target = "cuda"
+                if target and target != self._device:
+                    self._model.to(torch.device(target)); self._device = target
+
+            out_list = self._model.predict(images)                # your real workload
+            import zstandard as zstd, pickle
+            blob = zstd.ZstdCompressor().compress(pickle.dumps(out_list))
+            return pipeline_pb2.Envelope(
+                config_json=json.dumps({"my_box": {"status": "done", "num_images": len(images)}}),
+                data={"results": wrap_value(blob)})
+        except Exception as e:
+            logging.exception("inference failed")
+            return pipeline_pb2.Envelope(config_json=json.dumps(
+                {"my_box": {"status": "error", "error": str(e)}}))
+
+if __name__ == "__main__":
+    import grpc_reflection.v1alpha.reflection as grpc_reflection
+    logging.basicConfig(level=logging.INFO)
+    server = grpc.server(futures.ThreadPoolExecutor(), options=[
+        ("grpc.max_send_message_length", -1),
+        ("grpc.max_receive_message_length", -1),
+    ])
+    pb2_grpc.add_PipelineServiceServicer_to_server(Box(), server)
+    grpc_reflection.enable_server_reflection(
+        (pb2.DESCRIPTOR.services_by_name["PipelineService"].full_name,
+         grpc_reflection.SERVICE_NAME), server)
+    server.add_insecure_port(f"[::]:{os.getenv('PORT', '8061')}")
+    server.start()
+    server.wait_for_termination()
 ```
 
-Create `/home/manuelf/boxes/images/face_detector/src/aux.py`:
-
-```python
-import pipeline_pb2
-
-def wrap_value(obj):
-    if isinstance(obj, bytes):
-        return pipeline_pb2.Value(b=obj)
-    elif isinstance(obj, str):
-        return pipeline_pb2.Value(s=obj)
-    return pipeline_pb2.Value(b=b"")
-
-def unwrap_value(val):
-    kind = val.WhichOneof("kind")
-    if kind == "b":
-        return val.b
-    elif kind == "s":
-        return val.s
-    return None
-```
-
-#### Step 5: Create Dockerfile
-
-Create `/home/manuelf/boxes/images/face_detector/docker/Dockerfile`:
+### 3.3 Dockerfile (minimal, follows the repo convention)
 
 ```dockerfile
-ARG SERVICE_NAME=face_service
+ARG WORKSPACE=/workspace
 
 FROM python:3.10-slim AS builder
-RUN pip install grpcio grpcio-tools protobuf
-COPY protos /workspace/
-WORKDIR /workspace
-RUN python -m grpc_tools.protoc --python_out=. --grpc_python_out=. pipeline.proto
+RUN pip install --upgrade pip && pip install grpcio grpcio-tools protobuf
+COPY protos ${WORKSPACE}/
+WORKDIR ${WORKSPACE}
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. pipeline.proto
 
-FROM python:3.10-slim
+FROM nvidia/cuda:12.2.2-base-ubuntu22.04        # python:3.10-slim for CPU boxes
 ARG USER=runner
 RUN addgroup --system runner-group && \
-    adduser --system --ingroup runner-group runner && \
-    mkdir /workspace && chown runner:runner /workspace
+    adduser --system --no-create-home --ingroup runner-group runner && \
+    mkdir ${WORKSPACE} && chown -R runner:runner ${WORKSPACE}
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN apt update -y && apt install -y pip && apt-get clean && \
+    pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt && \
+    rm requirements.txt
 
-COPY --from=builder /workspace/*.py /workspace/
-COPY src/face_service.py /workspace/service.py
+COPY --from=builder ${WORKSPACE}/*.py ${WORKSPACE}/
+COPY src/${NAME}_service.py ${WORKSPACE}/service.py
 COPY protos/pipeline.proto /
 
-USER runner
 EXPOSE 8061
-CMD ["python", "/workspace/service.py"]
+WORKDIR ${WORKSPACE}
+USER runner
+CMD ["python3", "service.py"]
 ```
 
-Create `/home/manuelf/boxes/images/face_detector/requirements.txt`:
-
-```txt
-grpcio
-protobuf
-grpcio-reflection
-grpcio-status
-numpy
-cv2 face detection library here
-```
-
-#### Step 6: Build and Run
+### 3.4 Test + smoke-test
 
 ```bash
-cd /home/manuelf/boxes/images/face_detector
-docker build -t my_face_detector -f docker/Dockerfile .
-docker run --rm -it -p 8061:8061 my_face_detector
+cd images/<name>
+docker build --tag my_box -f docker/Dockerfile .
+docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_box
+
+# smoke test
+python test/test_<name>.py
+
+# client check
+python - <<'PY'
+from boxes_client import Box, pathlib
+b = Box("localhost:8061")
+print(b.info())
+print(b.run(data={"images": [pathlib.Path("x.jpg")]},
+            config={"my_box": {"command": "do_it", "parameters": {}}}).config)
+PY
 ```
 
-## Common Service Types Reference
+### 3.5 Ship it
 
-### CPU-only Services (No GPU)
-
-Best for: Small models, preprocessing, simple logic
-
-**Image base:** `python:3.10-slim`
-- opencv_box
-- folder_wd
-- textEmbedding (CPU mode)
-
-### GPU-accelerated Services
-
-Best for: Heavy AI/ML inference
-
-**Image base:** `nvidia/cuda:12.2.2-base-ubuntu22.04`
-- vggt
-- cotracker  
-- yologpt
-
-## Pipeline Pattern Reference
-
-See `/home/manuelf/boxes/docs/Pipeline_Configuration_Reference.md` for complete patterns.
-
-### Simple Sequential Pipeline
-
-```
-Input → Process Output
-```
-
-### Flow-Controlled Pipeline
-
-```
-Input → Check if change → Process only if changed → Output
-```
-
-### Parallel Processing Pipeline
-
-```
-                    ┌──▶ Algorithm A
-Input ──┬──▶ Split ├──▶ Algorithm B
-        └────────────▶ Algorithm C
-```
-
-## Next Steps
-
-1. **Explore existing pipelines:** Read config files in `/home/manuelf/boxes/pipelines/`
-2. **Test services standalone:** Use Python gRPC client to test individual services
-3. **Build custom service:** Follow the quick start above for your use case
-4. **Create pipeline config:** Define how services connect in Maestro
+Write `images/<name>/README.md` — the per-box reference (what to put in
+`config`, what to expect in `config_json.status`, how to decode `results`).
+That one file tells you whether the box is done.
 
 ## Troubleshooting
 
-### Service not responding on port 8061
+| Symptom | First check |
+|---|---|
+| `Connection refused` on `:8061` | `docker logs <ctr>`; did the container actually start? |
+| `status: error`, `no config_json` | Your request had an empty `config_json`. |
+| `status: error`, `no images in data` | You passed an `str` where a file was expected — use `pathlib.Path` or raw `bytes`. |
+| `status` not `done` and no `results` | Look at the box log; the client's `res.config["<box_key>"]["error"]` usually has the reason. |
+| CUDA OOM while the model is "on CPU" | The box may have fallen back to CPU after `_IDLE_TIMEOUT`; the model re-migrates on next request. |
+| Residual VRAM after fallback | Expected — see [Architecture → GPU memory lifecycle](Architecture_Overview.md). |
 
-- Check container logs: `docker logs <container>`
-- Verify service is running: `docker exec -it <container> ps aux | grep python`
+## Where to go next
 
-### Pipeline fails with "stage not found"
-
-- Check that all stage names in links match exactly (case-sensitive)
-- Ensure stages reference the same pipeline name
-
-### Images not loading (CUDA OOM)
-
-- Reduce batch size
-- Add idle timeout to move model back to CPU: `IDLE_TIMEOUT = 60`
-
-## Help
-
-See other docs:
-- `/home/manuelf/boxes/docs/Pipeline_Architecture_Overview.md`
-- `/home/manuelf/boxes/docs/gRPC_Services_Reference.md`
-- `/home/manuelf/boxes/docs/Pipeline_Configuration_Reference.md`
+- **Box contract & conventions**: [gRPC_Services_Reference](gRPC_Services_Reference.md)
+- **Whole-box mental model**: [Architecture_Overview](Architecture_Overview.md)
+- **Docker build templates**: [Docker_Image_Template_Guide](Docker_Image_Template_Guide.md)
+- **Client details**: [`boxes_client/README.md`](../boxes_client/README.md)
+- **A box's exact API**: `images/<name>/README.md`
