@@ -27,8 +27,7 @@ lang_segm/
 ├── src/
 │   └── lang_sam_service.py    # PipelineService.Process(Envelope)
 ├── test/
-│   ├── test_lang_sam.py       # standalone envelope smoke test
-│   └── test_lang_sam.ipynb    # legacy notebook (legacy config format)
+│   └── test_lang_sam.py       # standalone envelope smoke test
 └── requirements.txt
 ```
 
@@ -67,7 +66,8 @@ memory.
   (no-op; the box is stateless, but `reset_first` from `boxes_client`
   stays safe).
 - `config["lang_sam"]["parameters"]` — optional:
-  - `device` — `"cpu"` (default) or e.g. `"cuda:0"`.
+  - `device` — explicit target, e.g. `"cpu"` or `"cuda:0"`. When omitted
+    (the default), the box runs on `"cuda"` if a GPU is visible, else `"cpu"`.
   - `box_threshold` — Grounding-DINO box threshold (default `0.3`).
   - `text_threshold` — Grounding-DINO text threshold (default `0.25`).
 - `config["lang_sam"]["text_prompt"]` — list of prompt strings, e.g.
@@ -180,7 +180,3 @@ python test/test_lang_sam.py
 BOX_HOST=10.0.0.5:8061 python test/test_lang_sam.py
 # then open test/output_dog_langsam.png / test/output_car_langsam.png
 ```
-```
-
-There is also a legacy notebook `test/test_lang_sam.ipynb` (uses the old
-flat/`aispgradio` config format, still supported).

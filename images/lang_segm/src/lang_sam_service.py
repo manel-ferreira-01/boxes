@@ -87,30 +87,52 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                 idle_time = time.time() - self._last_request_time
                 if idle_time > _IDLE_TIMEOUT and self._device.startswith("cuda"):
                     logging.info("Idle timeout reached: moving model back to CPU")
-                    self.set_device("cpu")
+                    self._set_device_locked("cpu")
 
     def set_device(self, target: str) -> str:
-        """(Re)initialize the LangSAM model on the requested device."""
+        """(Re)place the LangSAM model on the requested device."""
         with self._lock:
             self._last_request_time = time.time()
-            target = target.lower()
-            if target.startswith("cuda") and not torch.cuda.is_available():
-                logging.warning("CUDA requested but not available. Staying on CPU.")
-                return self._device
+            return self._set_device_locked(target)
 
-            if target == self._device:
-                return self._device
+    def _set_device_locked(self, target: str) -> str:
+        """Swap the model device. Must be called with self._lock held."""
+        target = target.lower()
+        if target.startswith("cuda") and not torch.cuda.is_available():
+            logging.warning("CUDA requested but not available. Staying on %s.",
+                            self._device)
+            return self._device
 
+        if target == self._device:
+            return self._device
+
+        # Fast path: move the already-loaded torch modules in place. Much
+        # cheaper than rebuilding LangSAM, which reloads the SAM 2.1 and
+        # Grounding-DINO checkpoints on every switch.
+        try:
+            device = torch.device(target)
+            logging.info(f"Moving model to {target}")
+            self._model.sam.model.to(device)
+            self._model.gdino.model.to(device)
+            self._device = target
+        except Exception:
+            # Slow path (e.g. library internals changed, OOM): rebuild
+            # the model on the target device, like before.
             try:
-                logging.info(f"Reinitializing model on {target}")
-                new_model = LangSAM(sam_type=_DEFAULT_SAM_TYPE, device=target)
+                logging.exception("In-place move failed; rebuilding model on %s",
+                                  target)
+                new_model = LangSAM(sam_type=_DEFAULT_SAM_TYPE,
+                                    device=torch.device(target))
                 del self._model
-                torch.cuda.empty_cache()
                 self._model = new_model
                 self._device = target
             except Exception:
-                logging.exception(f"Failed to move model to {target}")
-            return self._device
+                logging.exception("Failed to move model to %s", target)
+                return self._device
+        else:
+            if not target.startswith("cuda"):
+                torch.cuda.empty_cache()
+        return self._device
 
     def Process(self, request, context):
         """Perform text-guided segmentation on image(s).
@@ -151,10 +173,15 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
         if box_cfg.get("command") == "reset" or parameters.get("reset"):
             return _status("done", action="reset")
 
-        # Device selection (optional).
-        requested_device = parameters.get("device")
+        # Device selection: an explicit "device" parameter (if any) wins;
+        # otherwise default to the GPU when CUDA is visible (matches the
+        # clip / textEmbedding / tapnext boxes and the README's documented
+        # "cuda automatically" contract).
+        requested_device = (parameters.get("device") or "").strip().lower()
         if requested_device:
             self.set_device(requested_device)
+        elif torch.cuda.is_available():
+            self.set_device("cuda")
 
         # --- Extract image(s) ---
         if "images" not in request.data:
