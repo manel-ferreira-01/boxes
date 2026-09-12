@@ -1,0 +1,65 @@
+name: boxes-fleet
+
+# Launch a bunch of boxes (prebuilt sipgisr images) side by side, all on the
+# shared `pipeline.PipelineService` interface, each on its own host port.
+#
+#   docker compose up -d          # start the fleet
+#   docker compose ps             # watch them come up
+#   python hello.py               # reach every box with ONE generic pattern
+#   docker compose down           # tear it down
+#
+# All boxes listen on 8061 internally; we map distinct host ports (906x).
+# GPU: each box requests the nvidia devices. To run the fleet on a CPU-only
+# host, delete the shared `gpu` block below -- the boxes will simply start on
+# CPU and degrade gracefully (slower).
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+
+  clip:
+    <<: *gpu
+    image: sipgisr/clip:latest
+    container_name: box-clip
+    ports: ["9061:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped
+
+  textembedding:
+    <<: *gpu
+    image: sipgisr/textembedding:latest
+    container_name: box-textembedding
+    ports: ["9062:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped
+
+  tapnext:
+    <<: *gpu
+    image: sipgisr/tapnexttracker:latest
+    container_name: box-tapnext
+    ports: ["9063:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped
+
+  lang_segm:
+    <<: *gpu
+    image: sipgisr/lang_sam:latest
+    container_name: box-lang_sam
+    ports: ["9064:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped
+
+  opencv:
+    <<: *gpu
+    image: sipgisr/opencvbox:latest
+    container_name: box-opencv
+    ports: ["9065:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped
