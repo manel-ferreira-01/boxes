@@ -95,6 +95,21 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
             self._last_request_time = time.time()
             return self._set_device_locked(target)
 
+    def _release_inference_cache(self) -> None:
+        """Free the image embeddings cached by the SAM2 predictor.
+
+        They are plain tensor attributes on the predictor (not module
+        parameters/buffers), so ``model.to("cpu")`` and
+        ``torch.cuda.empty_cache()`` cannot release them. They are
+        recomputed on every ``predict`` call, so dropping them is safe.
+        """
+        try:
+            predictor = getattr(self._model.sam, "predictor", None)
+            if predictor is not None and hasattr(predictor, "reset_predictor"):
+                predictor.reset_predictor()
+        except Exception:
+            logging.exception("Failed to release SAM2 predictor cache")
+
     def _set_device_locked(self, target: str) -> str:
         """Swap the model device. Must be called with self._lock held."""
         target = target.lower()
@@ -111,6 +126,11 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
         # Grounding-DINO checkpoints on every switch.
         try:
             device = torch.device(target)
+            # Drop the cached image embeddings first, otherwise the last
+            # inference's feature maps would keep referencing GPU memory
+            # even after moving off CUDA.
+            if not target.startswith("cuda"):
+                self._release_inference_cache()
             logging.info(f"Moving model to {target}")
             self._model.sam.model.to(device)
             self._model.gdino.model.to(device)
@@ -123,9 +143,11 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                                   target)
                 new_model = LangSAM(sam_type=_DEFAULT_SAM_TYPE,
                                     device=torch.device(target))
-                del self._model
+                del self._model  # also drops the old predictor's cache
                 self._model = new_model
                 self._device = target
+                if not target.startswith("cuda"):
+                    torch.cuda.empty_cache()
             except Exception:
                 logging.exception("Failed to move model to %s", target)
                 return self._device
@@ -218,6 +240,10 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                 received_images,
                 [text_prompt_str] * len(received_images),
                 box_threshold, text_threshold)
+            # LangSAM kept the SAM2 predictor's image embeddings for the
+            # last image batch; they are re-embedded on the next predict,
+            # so release them to keep GPU memory low between requests.
+            self._release_inference_cache()
         except Exception as e:
             logging.exception("[lang_sam] inference failed:\n%s", traceback.format_exc())
             return _status("error", error=str(e))
