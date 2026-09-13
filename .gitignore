@@ -6,6 +6,12 @@
 **/*.pyc
 **/*.jpg
 **/*.mp4
+# Test fixtures (inputs) referenced by the committed tests / fleet demos — tracked
+!images/clip/test/dog.jpg
+!images/clip/test/car.jpg
+!images/opencv_box/test/00.jpg
+!images/opencv_box/test/01.jpg
+!images/tapnext_tracker/test/apple.mp4
 .cache/
 output/
 **/test/output_*.png
