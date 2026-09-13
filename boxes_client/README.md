@@ -46,8 +46,13 @@ pip install -e boxes_client
 pip install -e "boxes_client[torch]"
 ```
 
-Without `torch`, tensor fields are returned as raw `bytes` (still usable —
+`zstandard` is a base dependency (the `zstd_pickle` codec needs it); `torch`
+stays optional. Without the codec's library, declared payloads degrade to raw
+`bytes` with a warning (still usable — e.g.
 `torch.load(BytesIO(res.tracks), weights_only=False)`).
+
+The full design of the declared-encoding contract lives in
+[CODECS.md](CODECS.md).
 
 ## Core API (box-agnostic) + optional conveniences
 
@@ -128,14 +133,45 @@ b.run(data={"vals": [1, 2, 3]}, config={...})       # -> FloatList
 
 `Result` wraps the raw response `Envelope`:
 
-- `fields` — dict of `field_name -> best-effort decoded value`
+- `fields` — dict of `field_name -> decoded value`
 - `.tracks`, `.visibles`, … — direct field access via `__getattr__`
 - `config` — parsed `config_json`
+- `encoding` — the box's **declared** payload encoding (codec-name string,
+  `{field: codec}` map, or `None`), so you can see *why* a field is decoded
+  or raw
 - `raw` — the undecoded `Envelope` proto
 - `as_dict()` — JSON-friendly version (numpy arrays -> `tolist`)
 
-Decoding order (`[src/boxes_client/decode_util.py](src/boxes_client/decode_util.py)`):
-**JSON → torch (if installed) → numpy → raw bytes.** Nothing raises.
+### Decoding: declared first, legacy guess as fallback
+
+The authoritative path is the box's **declaration**: the response `config_json`
+carries a generic `"encoding"` key — a codec name for all `bytes` fields, or a
+`{field_name: codec_name}` map:
+
+```json
+{ "lang_sam": { "status": "done", "encoding": "zstd_pickle" } }
+```
+
+``encoding`` scans the parsed config top-level, then each section (first hit
+wins). Named codecs (`[src/boxes_client/codec.py](src/boxes_client/codec.py)`,
+registry `CODECS` / `decode_with`, full design in [CODECS.md](CODECS.md)):
+
+| name          | payload                               | decoded to              |
+|---------------|---------------------------------------|-------------------------|
+| `identity`    | raw bytes (the default)              | `bytes` unchanged       |
+| `json`        | UTF-8 JSON                            | `list`/`dict`           |
+| `torch`       | `torch.save()` tensor / dict          | `Tensor` / `dict`       |
+| `numpy`       | raw float32 buffer                    | `np.ndarray`            |
+| `zstd_pickle` | `zstd.compress(pickle.dumps(obj))`    | decoded Python          |
+
+Unknown names or a missing codec library degrade to **raw bytes + a
+warning** — never an exception.
+
+The legacy guess chain
+(`[src/boxes_client/decode_util.py](src/boxes_client/decode_util.py)`):
+**JSON → torch (if installed) → numpy → raw bytes**, kept only for boxes that
+declared nothing. Guessing is approximate (the numpy branch will happily
+reinterpret any 4-byte-aligned blob); boxes are expected to declare.
 
 ## What's supported
 
@@ -175,8 +211,11 @@ BOX_HOST=localhost:8061 python boxes_client/tests/live_tapnext.py
 - **Auto-protocol.** `Box.info()` uses gRPC reflection to confirm the box
   serves `pipeline.PipelineService`. If the box does not serve reflection,
   calls still work — `info()` just reports `reflection: False`.
-- **Best-effort decoding.** JSON → torch → numpy → raw bytes (see above).
-  Nothing raises; you always get a `Result`.
+- **Declared-first decoding.** Boxes declare `"encoding"` in the response
+  config; the named codec decodes it. Undeclared payloads fall back to the
+  legacy JSON → torch → numpy → raw-bytes guess chain. Nothing raises; you
+  always get a `Result` (unknown codec / missing library → raw bytes +
+  warning).
 - **Forward boxes deferred.** cotracker / textEmbedding use bespoke
   `Forward` messages; they will work through this client with no changes once
   migrated to the shared envelope (clip is already migrated).

@@ -76,6 +76,7 @@ the shared pieces; the per-box READMEs describe the box-specific ones.
 | GPU lifecycle | CPU at startup → move to GPU on first request (when CUDA is visible) → watchdog falls back to CPU after ~60 s idle. See [GPU lifecycle](#gpu-memory-lifecycle) |
 | Config | JSON section namespaced under the box key (`{"clip": {...}}`, `{"lang_sam": {...}}`, …) |
 | Heavy results | `data.results` often carries `zstd.compress(pickle.dumps(list))` |
+| Payload encoding | declared in the response `config_json` (`"encoding"`, a codec name or `{field: codec}` map); codecs are generic (`identity`/`json`/`torch`/`numpy`/`zstd_pickle`); boxes that declare nothing return raw `bytes` by default. See [`boxes_client/CODECS.md`](../boxes_client/CODECS.md) |
 | Stateless request | `{"command": "reset"}` is accepted on every standard box; stateful boxes (tapnext) clear state, stateless boxes no-op |
 
 ### GPU memory lifecycle

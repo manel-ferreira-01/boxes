@@ -98,7 +98,11 @@ format `{"parameters": {...}, "text_prompt": [...]}`.
 |-----------|-----------------------------------------|-------------|
 | `results` | `zstd.compress(pickle.dumps(list))`     | one `LangSAM.predict()` output dict per input image (masks, bboxes, scores, …) |
 
-Decode with:
+The response config declares the encoding — `"encoding": "zstd_pickle"` —
+under the `lang_sam` section, so `boxes_client` decodes it for you (the
+client never guesses). With raw bytes (without the client, or with
+an old client/image that predates the declaration) use the generic
+`zstd_pickle` contract:
 
 ```python
 import pickle, zstandard as zstd
@@ -121,8 +125,6 @@ stages forward bare envelopes and that behavior is preserved.
 ## Call with boxes_client
 
 ```python
-import io, pickle
-import zstandard as zstd
 from boxes_client import Box
 
 b = Box("localhost:8061")
@@ -134,10 +136,17 @@ res = b.run(
         "text_prompt": ["a car", "the road"],
     }},
 )
-print(res.config)   # {"lang_sam": {"status": "done", "runtime": ..., ...}}
+print(res.config)    # {"lang_sam": {"status": "done", "encoding": "zstd_pickle", ...}}
+print(res.encoding)  # "zstd_pickle" — the box's declared payload encoding
 
-out_list = pickle.loads(zstd.ZstdDecompressor().decompress(res.results))
+# The client decodes `results` via the declared codec: it's a plain list.
+out_list = res.results
 print([len(o["masks"]) for o in out_list])
+
+# (Manual unwrap — only if talking to an image that predates the
+#  encoding declaration, or without boxes_client:)
+# import pickle, zstandard as zstd
+# out_list = pickle.loads(zstd.ZstdDecompressor().decompress(res.results))
 ```
 
 Or use the vendored protos directly:

@@ -1,28 +1,38 @@
-"""Best-effort decoding of Envelope data values.
+"""Best-effort decoding of Envelope data values — the *legacy auto* path.
 
-Boxes send heavy payloads as raw ``bytes``. The most common encodings are:
-  * ``numpy`` produced via ``np_to_bytes`` (opencv_box pattern) -> plain ndarrays
-  * ``torch.save`` (vggt / tapnext pattern)              -> need torch to load
-  * plain image bytes (JPEG/PNG)                          -> keep as bytes
-  * JSON strings                                          -> parse if valid
+Boxes send heavy payloads as raw ``bytes``. The old client *guessed* the
+encoding; that guessing is kept only as a **legacy fallback** so
+un-migrated boxes keep working. The documented path is the box-declared
+``"encoding"`` keyword decoded by the named codecs in
+:mod:`boxes_client.codec` (see ``CODECS.md``): when a field has a declared
+codec, :mod:`boxes_client.result` uses :func:`codec.decode_with` directly
+and this guessing never runs.
 
-This module tries each encoder in turn and falls back to the raw ``bytes``
-on any failure. Nothing here raises: the client always returns *something*.
+Guess chain (legacy): JSON (if it looks like JSON) -> torch (if installed)
+-> numpy (if 4-byte aligned and not an image) -> raw ``bytes``. Nothing here
+raises: the client always returns *something*.
+
+.. note::
+    The guessing is imperfect: the numpy branch fires on *any*
+    4-byte-aligned blob and can return a plausible-looking but wrong float
+    array. If you control the box, declare ``"encoding"`` in its response
+    config instead of relying on guessing.
+
+The codec *bodies* live once in :mod:`boxes_client.codec`; this module
+wraps them with the legacy "try it, or fall through" behaviour.
 """
 
-import io
-import json
-
-import numpy as np
+from .codec import _decode_json, _decode_numpy, _decode_torch  # noqa: F401  (shared bodies / back-compat)
 
 
 def _try_numpy(buf: bytes):
     try:
-        arr = np.frombuffer(buf, dtype=np.float32)
-        return arr
+        return _decode_numpy(buf)
     except Exception:
         pass
     try:
+        # legacy extra: the uint8 fallback kept for pre-declaration behaviour
+        import numpy as np
         arr = np.frombuffer(buf, dtype=np.uint8)
         if arr.nbytes == 0:
             return None
@@ -32,12 +42,14 @@ def _try_numpy(buf: bytes):
 
 
 def _try_torch(buf: bytes):
+    """Legacy: only accepts a plain Tensor payload (the original contract);
+    dict-of-tensors go through the declared ``torch`` codec instead."""
     try:
-        import torch  # noqa: W061
+        import torch
     except ImportError:
         return None
     try:
-        obj = torch.load(io.BytesIO(buf), weights_only=False, map_location="cpu")
+        obj = _decode_torch(buf)
         if isinstance(obj, torch.Tensor):
             return obj
     except Exception:
@@ -53,7 +65,7 @@ def _try_json(buf: bytes):
     if not s or s[0] not in "{[":
         return None
     try:
-        return json.loads(s)
+        return _decode_json(buf)
     except Exception:
         return None
 
@@ -61,7 +73,9 @@ def _try_json(buf: bytes):
 def decode_payload(buf):
     """Return the decoded value of ``buf``.
 
-    Order: JSON (if it looks like it) -> torch (tapnext / vggt) -> numpy
+    Order (legacy fallback only — boxes are expected to declare
+    ``"encoding"`` in the response config instead):
+    JSON (if it looks like it) -> torch (tapnext / vggt) -> numpy
     (opencv_box ``np_to_bytes``) -> raw ``bytes``.
     Nothing raises: the client always returns *something*.
     """

@@ -258,6 +258,9 @@ class PipelineService(lang_sam_grpc.PipelineServiceServicer):
                 "runtime": runtime,
                 "num_images": len(received_images),
                 "num_prompts": len(text_prompts),
+                # Declared payload encoding (generic boxes_client contract):
+                # data.results is zstd.compress(pickle.dumps(list)).
+                "encoding": "zstd_pickle",
             }}),
             data={"results": wrap_value(_encode_results(out_list))}
         )

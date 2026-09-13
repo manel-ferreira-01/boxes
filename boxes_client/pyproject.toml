@@ -14,6 +14,7 @@ dependencies = [
     "protobuf>=4.21",
     "grpcio-reflection>=1.50",
     "numpy>=1.21",
+    "zstandard>=0.18",
 ]
 
 [project.optional-dependencies]

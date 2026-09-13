@@ -105,8 +105,32 @@ out_list = pickle.loads(zstandard.ZstdDecompressor().decompress(bytes(blob)))
 ```
 
 LangSAM (`lang_segm`) produces it; `folder_wd` consumes it — that's a real
-cross-box contract. The client decodes it for you in `Result.fields["results"]`
-when `pickle` is importable.
+cross-box contract.
+
+**Declared encoding (the contract, not a guess).** Boxes describe their
+payload in the response `config_json` with the generic `"encoding"` key:
+
+- a **string** codec name → applies to every `bytes` field:
+  `"lang_sam": {"status": "done", "encoding": "zstd_pickle"}`
+- an **object** → a `{field_name: codec_name}` map for mixed responses:
+  `"clip": {"status": "done", "encoding": {"image_emb": "torch", …}}`
+
+Codec vocabulary (generic names, pure `bytes -> object`; full design in
+[`boxes_client/CODECS.md`](../boxes_client/CODECS.md)):
+
+| name          | input                            | output                        |
+|---------------|----------------------------------|-------------------------------|
+| `identity`    | raw bytes                        | `bytes` (unchanged; the default) |
+| `json`        | UTF-8 JSON                       | `list`/`dict`                 |
+| `torch`       | `torch.save()` tensor / dict     | `Tensor` / `dict[Tensor]`     |
+| `numpy`       | raw numeric buffer (float32)     | `np.ndarray`                  |
+| `zstd_pickle` | `zstd.compress(pickle.dumps(...))` | decoded Python (usually `list`) |
+
+`boxes_client` decodes declared fields directly (`res.encoding` exposes
+what was declared); a box that declares nothing — or a codec whose library
+is missing — still returns usable raw `bytes`, and old clients that ignore
+the key keep decoding by their legacy JSON → torch → numpy → raw guess
+chain.
 
 ## Response `config_json`
 
@@ -172,7 +196,10 @@ Client rules (full doc: [`boxes_client/README.md`](../boxes_client/README.md)):
   `pathlib.Path` or raw `bytes`.
 - Homogeneous lists become `BytesList` / `StringList` / `FloatList`; scalars
   become `b` / `s` / `f`.
-- `Result.fields` decodes by JSON → torch (if installed) → numpy → raw bytes.
+- Decoding: the box **declares** its payload encoding in the response
+  config (`"encoding"`, above); declared fields are decoded by the named
+  codec, undeclared ones by the legacy JSON → torch → numpy → raw-bytes
+  chain. The client never raises; `res.encoding` shows what was declared.
 
 ### Raw (without the client)
 

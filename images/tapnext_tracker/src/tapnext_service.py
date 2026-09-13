@@ -202,7 +202,14 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                         "status": "done",
                         "frames_processed": len(self.accumulated_tracks),
                         "runtime": time.time() - start_time,
-                        "num_points": self.accumulated_tracks[0].shape[0] if self.accumulated_tracks else 0
+                        "num_points": self.accumulated_tracks[0].shape[0] if self.accumulated_tracks else 0,
+                        # Declared payload encoding (generic boxes_client contract):
+                        # all tensor responses are torch.save()-format bytes.
+                        "encoding": {
+                            "tracks": "torch",
+                            "visibles": "torch",
+                            "observation_matrix": "torch",
+                        }
                     }
                 }),
                 data=response_data

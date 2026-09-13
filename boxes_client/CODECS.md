@@ -1,12 +1,12 @@
-# CODECS — self-describing payload decoding  (DESIGN + TODO, not yet implemented)
+# CODECS — self-describing payload decoding  (design + rationale)
 
-**Status:** designed, **not implemented.** This is the plan to close the last
-gap in the agnostic design: right now heavy payloads come back as raw `bytes`
-and the client *guesses* how to decode them. Make it explicit instead.
+**Status: implemented** — `codec.py` (5 named codecs + `decode_with`),
+`Result.encoding` threading, box declarations (lang_segm/tapnext/clip/sbert),
+`zstandard` dependency, `tests/codec_smoke.py`, and the doc updates below.
+This file remains the design record; acceptance criteria at the bottom.
 
-> Why this file: we were mid-task when the context window ran low. Everything
-> below is decided and reasoned through; the next session should *implement*,
-> not re-decide. Acceptance criteria at the bottom are concrete and testable.
+Background: heavy payloads used to come back as raw `bytes` and the client
+*guessed* how to decode them. That is now explicit and declared instead.
 
 ---
 

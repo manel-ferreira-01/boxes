@@ -102,6 +102,12 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                         "status": "done",
                         "runtime": time.time() - start_time,
                         "num_texts": len(texts),
+                        # Declared payload encoding (generic boxes_client contract):
+                        # all responses are torch.save()-format tensor bytes.
+                        "encoding": {
+                            "embeddings": "torch",
+                            "similarities": "torch",
+                        }
                     }
                 }),
                 data=response_data
