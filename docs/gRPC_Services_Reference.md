@@ -116,7 +116,7 @@ payload in the response `config_json` with the generic `"encoding"` key:
   `"clip": {"status": "done", "encoding": {"image_emb": "torch", …}}`
 
 Codec vocabulary (generic names, pure `bytes -> object`; full design in
-[`boxes_client/CODECS.md`](../boxes_client/CODECS.md)):
+[CODECS.md](CODECS.md)):
 
 | name          | input                            | output                        |
 |---------------|----------------------------------|-------------------------------|

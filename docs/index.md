@@ -14,6 +14,9 @@ shared gRPC envelope, called by `boxes_client` or by orchestration-layer boxes.
   devices, calling via `boxes_client` or raw stubs.
 - **[Docker_Image_Template_Guide](Docker_Image_Template_Guide.md)** — Dockerfile
   templates (CPU / CUDA / YOLO) used by the boxes in this repo.
+- **[CODECS](CODECS.md)** — self-describing payload decoding: the `"encoding"`
+  contract boxes declare in their response config, the 5 named codecs, the
+  legacy fallback, and design rationale.
 
 ## Boxes in this repo
 

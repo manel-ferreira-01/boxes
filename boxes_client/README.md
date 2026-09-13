@@ -52,7 +52,7 @@ stays optional. Without the codec's library, declared payloads degrade to raw
 `torch.load(BytesIO(res.tracks), weights_only=False)`).
 
 The full design of the declared-encoding contract lives in
-[CODECS.md](CODECS.md).
+[docs/CODECS.md](../docs/CODECS.md).
 
 ## Core API (box-agnostic) + optional conveniences
 
@@ -154,7 +154,7 @@ carries a generic `"encoding"` key — a codec name for all `bytes` fields, or a
 
 ``encoding`` scans the parsed config top-level, then each section (first hit
 wins). Named codecs (`[src/boxes_client/codec.py](src/boxes_client/codec.py)`,
-registry `CODECS` / `decode_with`, full design in [CODECS.md](CODECS.md)):
+registry `CODECS` / `decode_with`, full design in [docs/CODECS.md](../docs/CODECS.md)):
 
 | name          | payload                               | decoded to              |
 |---------------|---------------------------------------|-------------------------|
