@@ -34,19 +34,27 @@ permissions:
 
 jobs:
   publish:
-    name: "publish ${{ matrix.box }}"
+    name: "publish ${{ matrix.box.image }}"
     runs-on: ubuntu-latest
     strategy:
       # One failing box must not block the rest from publishing.
       fail-fast: false
       matrix:
-        # One entry per publishable box (directory names under images/,
-        # lower-cased — that is also the GHCR image name).
+        # One entry per publishable box.
+        #   dir     = directory under images/ (build context; case-sensitive!)
+        #   image   = GHCR image name (lowercase) — this is what `docker pull`
+        #             and fleet/docker-compose.yml use.
         #
         # vggt is EXCLUDED: its vendored model package `images/vggt/src/vggt/`
         # is missing from the repo (see images/vggt/src/vggt_service.py), so
-        # the image cannot build. Restore that package to re-add "vggt" here.
-        box: [clip, tapnext_tracker, lang_segm, textembedding, opencv_box, yologpt]
+        # the image cannot build. Restore that package to re-add it here.
+        box:
+          - { dir: clip,          image: clip }
+          - { dir: tapnext_tracker, image: tapnext_tracker }
+          - { dir: lang_segm,     image: lang_segm }
+          - { dir: textEmbedding, image: textembedding }
+          - { dir: opencv_box,    image: opencv_box }
+          - { dir: yologpt,       image: yologpt }
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -76,12 +84,12 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: "images/${{ matrix.box }}"
-          file: "images/${{ matrix.box }}/docker/Dockerfile"
+          context: "images/${{ matrix.box.dir }}"
+          file: "images/${{ matrix.box.dir }}/docker/Dockerfile"
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.box }}:${{ steps.ver.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.box }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.box.image }}:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.box.image }}:latest
 
   # Print the immutable digests so the fleet compose can be pinned to them:
   #     docker buildx imagetools inspect ghcr.io/<owner>/<box>:<version>
@@ -109,9 +117,9 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           echo "Pin fleet/docker-compose.yml to these digests for a fully reproducible fleet:"
-          for box in clip tapnext_tracker lang_segm textembedding opencv_box yologpt; do
-            d=$(docker buildx imagetools inspect "ghcr.io/${OWNER}/${box}:${VER}" 2>/dev/null \
+          for image in clip tapnext_tracker lang_segm textembedding opencv_box yologpt; do
+            d=$(docker buildx imagetools inspect "ghcr.io/${OWNER}/${image}:${VER}" 2>/dev/null \
                 | awk '/^Digest:/{print $2}')
-            echo "  $box -> ghcr.io/${OWNER}/${box}@${d:-<push failed — check that job>}"
+            echo "  $image -> ghcr.io/${OWNER}/${image}@${d:-<push failed — check that job>}"
           done
         
