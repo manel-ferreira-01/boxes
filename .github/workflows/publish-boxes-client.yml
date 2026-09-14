@@ -55,7 +55,8 @@ jobs:
       # user gets (no torch). Tests must pass there.
       - name: Install wheel (no torch) + test
         run: |
-          python3 -m pip install "boxes_client/dist/*-py3-none-any.whl"
+          # NB: leave the glob UNquoted so bash expands it to the one wheel.
+          python3 -m pip install boxes_client/dist/*-py3-none-any.whl
           python3 boxes_client/tests/fake_box_smoke.py
           python3 boxes_client/tests/codec_smoke.py
 
