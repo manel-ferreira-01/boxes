@@ -90,6 +90,20 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.box.image }}:${{ steps.ver.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.box.image }}:latest
+          # Build layer cache, kept on the same (free, public) GHCR as a
+          # cache image. PER-BOX ref on purpose: the jobs run in parallel and
+          # concurrent writers to one shared tag would clobber each other's
+          # cache. Identical base/torch layers de-duplicate by digest on the
+          # registry, so storage is ~the union, not the sum.
+          # mode=min (default): only intermediate layers are cached; the final
+          # image is already published under its own tag.
+          # First publish pushes the cache once (~5-13 GB per box); after that
+          # only changed layers transfer — unchanged boxes build in ~1-2 min.
+          # Local dev can feed the same cache: docker login ghcr.io, then
+          #   docker buildx build --cache-from type=registry,ref=<this> \
+          #   --cache-to type=registry,ref=<this> ...
+          cache-from: "type=registry,ref=ghcr.io/${{ github.repository_owner }}/cache-${{ matrix.box.image }}:latest"
+          cache-to: "type=registry,ref=ghcr.io/${{ github.repository_owner }}/cache-${{ matrix.box.image }}:latest"
 
   # Print the immutable digests so the fleet compose can be pinned to them:
   #     docker buildx imagetools inspect ghcr.io/<owner>/<box>:<version>
