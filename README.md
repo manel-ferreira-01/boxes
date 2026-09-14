@@ -63,7 +63,7 @@ docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_lang_segm
 | Box | Type | What it does |
 |-----|------|--------------|
 | clip | GPU | CLIP image/text embeddings |
-| tapnext_tracker | GPU | Point tracking with TAPNext (stateful) |
+| tapnext_tracker | GPU | Point tracking with TAPNext (stateful; multi-session via `session_id`) |
 | lang_segm | GPU | Text-guided segmentation (LangSAM) |
 | textEmbedding | GPU / CPU | Sentence-BERT text embeddings |
 | vggt | GPU | 3D reconstruction from image sequences |

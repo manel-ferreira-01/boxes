@@ -63,7 +63,7 @@ Use them; don't hand-roll the oneof.
 
 | Box (`images/…`) | Box key | Notes |
 |---|---|---|
-| tapnext_tracker | `tapnext` | stateful — `reset` clears the active tracker |
+| tapnext_tracker | `tapnext` | stateful & **multi-session**: `session_id` (opaque string, omitted → shared `default` session) keys all state; `reset` clears that session only; `list` gives the operator the active sessions |
 | clip | `clip` | stateless |
 | textEmbedding | `sbert` | stateless |
 | lang_segm | `lang_sam` | aliases accepted: `lang_segm`, `aispgradio`, or the legacy flat form |

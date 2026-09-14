@@ -77,7 +77,7 @@ the shared pieces; the per-box READMEs describe the box-specific ones.
 | Config | JSON section namespaced under the box key (`{"clip": {...}}`, `{"lang_sam": {...}}`, …) |
 | Heavy results | `data.results` often carries `zstd.compress(pickle.dumps(list))` |
 | Payload encoding | declared in the response `config_json` (`"encoding"`, a codec name or `{field: codec}` map); codecs are generic (`identity`/`json`/`torch`/`numpy`/`zstd_pickle`); boxes that declare nothing return raw `bytes` by default. See [CODECS.md](CODECS.md) |
-| Stateless request | `{"command": "reset"}` is accepted on every standard box; stateful boxes (tapnext) clear state, stateless boxes no-op |
+| Stateless request | `{"command": "reset"}` is accepted on every standard box; stateless boxes no-op it. The stateful box (tapnext) is **multi-session**: `session_id` in the config section keys all state (omitted → one shared `default` session), so `reset` only clears the calling session |
 
 ### GPU memory lifecycle
 
