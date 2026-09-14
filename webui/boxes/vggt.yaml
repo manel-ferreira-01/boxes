@@ -1,0 +1,54 @@
+# VGGT box — 3D reconstruction (legacy flat config).
+# Authoritative request shape: ../../images/vggt/Readme.md
+id: vggt
+name: "VGGT · 3D reconstruction"
+flat_config: true            # parameters at the top level of config_json (legacy)
+docs: ../../images/vggt/Readme.md
+note: >
+  All frames must share height/width and be RGB.  Response section is "VGGT".
+  Heavy outputs (world points, depths, matrices) are raw float32 buffers —
+  the webui streams them as typed-array artifacts for the tensor visualizer.
+
+inputs:
+  - field: images
+    widget: image_upload
+    kind: bb
+    multiple: true
+    required: true
+    constraint: "identical height/width, RGB frames"
+    helper: video_frames
+
+parameters:
+  - key: conf_threshold
+    widget: slider
+    min: 0
+    max: 100
+    step: 1
+    default: 30
+  - key: device
+    widget: select
+    values: [auto, cpu, cuda, "cuda:0"]
+    default: auto
+
+results:
+  - field: glb_file
+    visualizer: glb
+    caption: "reconstructed scene (glTF binary)"
+  - field: world_points
+    visualizer: tensor
+    caption: "world-space points"
+  - field: world_points_conf
+    visualizer: tensor
+  - field: depth
+    visualizer: tensor
+    caption: "depth maps"
+  - field: depth_conf
+    visualizer: tensor
+  - field: extrinsic
+    visualizer: tensor
+    caption: "camera extrinsics"
+  - field: intrinsic
+    visualizer: tensor
+    caption: "camera intrinsics"
+  - field: "*"
+    visualizer: json

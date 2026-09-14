@@ -1,0 +1,139 @@
+"""The box definitions are the contract: they must load, validate, and stay
+consistent.  A typo here must fail loudly, not ship."""
+
+import pathlib
+
+import pytest
+
+from webui.core import BoxDef, load_registry, RegistryError
+
+BOXES_DIR = pathlib.Path(__file__).resolve().parents[1] / "boxes"
+
+
+@pytest.fixture(scope="module")
+def reg():
+    return load_registry(BOXES_DIR)
+
+
+EXPECTED_IDS = {"clip", "tapnext", "lang_sam", "sbert", "vggt"}
+
+
+def test_out_of_scope_boxes_are_absent(reg):
+    """yologpt / opencv_box predate the shared envelope (Process) contract
+    and are intentionally skipped until they migrate — the webui stays
+    contract-only.  Re-add their definitions when the boxes do."""
+    ids = {d.id for d in reg}
+    assert "yologpt" not in ids and "opencv" not in ids
+
+
+def test_all_seven_load(reg):
+    ids = {d.id for d in reg}
+    assert ids == EXPECTED_IDS, ids
+
+
+def test_every_def_has_form_and_results(reg):
+    for d in reg:
+        assert d.inputs, f"{d.id}: no inputs"
+        assert d.results, f"{d.id}: no results"
+        assert any(r.field == "*" for r in d.results), f"{d.id}: no '*' fallback visualizer"
+
+
+def test_flat_boxes_have_no_box_key(reg):
+    for d in reg:
+        if d.flat_config:
+            assert d.box_key is None, d.id
+        else:
+            assert d.box_key, f"{d.id}: needs a box_key"
+
+
+def test_clip(reg):
+    d = reg.get("clip")
+    assert d.box_key == "clip"
+    assert d.command.default == "encode"
+    assert {f.field for f in d.inputs} == {"images", "texts"}
+    assert any(p.key == "model" for p in d.parameters)
+
+
+def test_tapnext_is_stateful_sessioned(reg):
+    d = reg.get("tapnext")
+    assert d.box_key == "tapnext"
+    assert d.session is not None and d.session.key == "session_id"
+    assert d.session.auto_generate and "reset" in d.session.actions
+    assert {a for a in d.command.values} == {"track", "reset", "list"}
+
+
+def test_lang_sam_section_prompt_is_required(reg):
+    d = reg.get("lang_sam")
+    sec = {s.key: s for s in d.section}
+    assert "text_prompt" in sec and sec["text_prompt"].required
+    assert d.box_key == "lang_sam"
+
+
+def test_vggt_flat_and_glb(reg):
+    d = reg.get("vggt")
+    assert d.flat_config and d.box_key is None
+    viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
+    assert viz["glb_file"] == "glb"
+
+
+def test_non_process_refused():
+    """The contract only allows Process for now — any other method is a
+    clear refusal, not a half-working path."""
+    from webui.core import BoxDef, CallRequest, CallBuildError, build_call, ArtifactStore
+    from webui.core.schema import ActionDef
+    d = BoxDef(id="precontract", name="pre", box_key="pre",
+               actions=[ActionDef(name="detect", method="DetectSequence")])
+    with pytest.raises(CallBuildError, match="not the shared contract RPC"):
+        build_call(d, CallRequest(action="detect"), ArtifactStore())
+
+
+def test_match_is_lenient(reg):
+    assert reg.match("tapnext").id == "tapnext"
+    assert reg.match("TAPNEXT").id == "tapnext"
+    assert reg.match("LangSAM · text segmentation").id == "lang_sam"
+    assert reg.match("nope") is None
+    assert reg.match(None) is None
+
+
+def test_bad_widget_rejected(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(
+        "id: x\nname: x\nbox_key: x\n"
+        "inputs:\n  - {field: images, widget: bogus_widget}\n"
+        "results:\n  - {field: \"*\", visualizer: json}\n"
+    )
+    with pytest.raises(RegistryError, match="bogus_widget"):
+        load_registry(tmp_path)
+
+
+def test_flat_plus_box_key_rejected(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text("id: x\nname: x\nbox_key: x\nflat_config: true\n"
+                 "inputs: []\nresults: []\n")
+    with pytest.raises(RegistryError, match="flat_config"):
+        from webui.core import load_def
+        load_def(p)
+
+
+def test_unknown_key_rejected(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text("id: x\nname: x\nbox_key: x\nnot_a_field: 1\n"
+                 "inputs: []\nresults: []\n")
+    from webui.core import load_def
+    with pytest.raises(Exception, match="not_a_field"):
+        load_def(p)
+
+
+def test_duplicate_ids_rejected(tmp_path):
+    (tmp_path / "a.yaml").write_text(
+        "id: x\nname: x\nbox_key: x\ninputs: []\nresults: []\n")
+    (tmp_path / "b.yaml").write_text(
+        "id: x\nname: x\nbox_key: x\ninputs: []\nresults: []\n")
+    with pytest.raises(RegistryError, match="duplicate box id"):
+        load_registry(tmp_path)
+
+
+def test_to_list_json_serializable(reg):
+    import json
+    payload = json.dumps(reg.to_list())
+    assert "lang_sam" in payload

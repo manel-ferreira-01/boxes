@@ -101,6 +101,8 @@ Start in [docs/index.md](docs/index.md):
 - [Docker image template guide](docs/Docker_Image_Template_Guide.md) — the
   Dockerfile templates used by the boxes in this repo
 - [CODECS](docs/CODECS.md) — self-describing payload decoding
+- [webui](webui/README.md) — declarative web layer over the fleet (HTTP API on
+  top of `boxes_client`; box knowledge lives in YAML definitions)
 
 ## Tests
 

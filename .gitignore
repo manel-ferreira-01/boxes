@@ -20,3 +20,9 @@ output/
 *.MOV
 **/dist/
 *.egg-info/
+node_modules/
+# webui local state (fleet entries, etc.)
+webui/data/
+# pytest cache
+.pytest_cache/
+
