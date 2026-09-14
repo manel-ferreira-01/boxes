@@ -37,4 +37,9 @@ from .envelope import load
 from .conveniences import trace  # optional, convenience layer (not core)
 
 __all__ = ["Box", "Result", "load", "trace"]
-__version__ = "0.1.0"
+
+try:
+    from importlib.metadata import version as _dist_version
+    __version__ = _dist_version("boxes-client")
+except Exception:  # not installed as a distribution (e.g. bare src/ layout)
+    __version__ = "0.1.1"

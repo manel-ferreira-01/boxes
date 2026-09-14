@@ -16,5 +16,5 @@
 output/
 **/test/output_*.png
 *.MOV
-*.movegg-info/
+**/dist/
 *.egg-info/

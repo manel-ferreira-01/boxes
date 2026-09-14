@@ -41,10 +41,12 @@ nature of the fleet).
 ## Install
 
 ```bash
-pip install -e boxes_client
+pip install boxes-client
 # optional, to decode tapnext/vggt tensor payloads to numpy:
-pip install -e "boxes_client[torch]"
+pip install "boxes-client[torch]"
 ```
+
+(From a repo checkout, instead: `pip install -e boxes_client`.)
 
 `zstandard` is a base dependency (the `zstd_pickle` codec needs it); `torch`
 stays optional. Without the codec's library, declared payloads degrade to raw

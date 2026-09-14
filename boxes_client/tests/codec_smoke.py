@@ -17,6 +17,10 @@ client decodes the payload via the named codec instead of guessing:
    and degrades to raw bytes (never raises) when a codec's library is missing
    or the name is unknown.
 
+``torch`` is an optional extra: the torch-dependent pieces of cases 5/6 are
+skipped (not failed) when it is not installed, so the test also passes on a
+plain ``pip install boxes-client``.
+
 Run:
     python boxes_client/tests/codec_smoke.py
 """
@@ -33,8 +37,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 import grpc
 import grpc_reflection.v1alpha.reflection as grpc_reflection
 import pickle
-import torch
 import zstandard as zstandard
+try:
+    import torch
+except ImportError:  # optional extra -- the torch-dependent cases are skipped
+    torch = None
 
 from boxes_client import Box
 from boxes_client.codec import CODECS, decode_with
@@ -144,19 +151,20 @@ def unit_roundtrips() -> int:
     back = decode_with(arr.tobytes(), "numpy")
     assert isinstance(back, np.ndarray) and back.tolist() == [1.5, -2.5, 3.25], back
 
-    # torch tensor (Tensor payload)
-    t = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-    blob = io.BytesIO(); torch.save(t, blob, pickle_protocol=4)
-    out = decode_with(blob.getvalue(), "torch")
-    assert isinstance(out, torch.Tensor) and out.tolist() == t.tolist(), out
+    # torch payloads (Tensor + dict) -- only when torch is installed
+    if torch is not None:
+        t = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        blob = io.BytesIO(); torch.save(t, blob, pickle_protocol=4)
+        out = decode_with(blob.getvalue(), "torch")
+        assert isinstance(out, torch.Tensor) and out.tolist() == t.tolist(), out
 
-    # torch dict payload (the codec keeps the object, the old guess dropped it)
-    d = {"tracks": torch.zeros(2, 4)}
-    blob = io.BytesIO(); torch.save(d, blob, pickle_protocol=4)
-    out = decode_with(blob.getvalue(), "torch")
-    assert isinstance(out, dict) and set(out) == {"tracks"}
-    assert isinstance(out["tracks"], torch.Tensor) and torch.equal(
-        out["tracks"], torch.zeros(2, 4))
+        # torch dict payload (the codec keeps the object, the old guess dropped it)
+        d = {"tracks": torch.zeros(2, 4)}
+        blob = io.BytesIO(); torch.save(d, blob, pickle_protocol=4)
+        out = decode_with(blob.getvalue(), "torch")
+        assert isinstance(out, dict) and set(out) == {"tracks"}
+        assert isinstance(out["tracks"], torch.Tensor) and torch.equal(
+            out["tracks"], torch.zeros(2, 4))
 
     # zstd_pickle (the lang_segm format)
     out = decode_with(_zstd_pickle(_OUT_LIST), "zstd_pickle")
@@ -169,7 +177,12 @@ def unit_roundtrips() -> int:
 
     # missing library degrades to raw bytes + warning, no raise.
     # Simulated by poisoning sys.modules so `import torch` raises ImportError.
-    blob = io.BytesIO(); torch.save(torch.zeros(1), blob, pickle_protocol=4)
+    # (Without torch installed, any bytes do -- the codec raises ImportError
+    # before it ever parses the payload.)
+    if torch is not None:
+        blob = io.BytesIO(); torch.save(torch.zeros(1), blob, pickle_protocol=4)
+    else:
+        blob = io.BytesIO(b"opaque-torch-bytes")
     saved_torch, saved_zstd = sys.modules.get("torch"), sys.modules.get("zstandard")
     sys.modules["torch"] = None
     sys.modules["zstandard"] = None
@@ -270,17 +283,20 @@ def main() -> int:
 
         # ------------------------------------------------------------- case 5
         print("\n== case 5: no encoding -> legacy auto-chain unchanged ==")
-        srv, port = _serve(FakeLegacy(), "legacybox")
-        servers.append(srv)
-        b = Box(f"127.0.0.1:{port}")
-        try:
-            res = b.run(data={}, config={"legacybox": {"command": "work"}})
-            assert res.encoding is None
-            assert isinstance(res.tensors, torch.Tensor) and res.tensors.shape == (2, 3)
-            assert res.meta == {"k": "v"}
-            print("  OK  -- torch tensor + JSON still auto-decoded")
-        finally:
-            b.close()
+        if torch is None:
+            print("  SKIP -- torch not installed (pip install 'boxes-client[torch]')")
+        else:
+            srv, port = _serve(FakeLegacy(), "legacybox")
+            servers.append(srv)
+            b = Box(f"127.0.0.1:{port}")
+            try:
+                res = b.run(data={}, config={"legacybox": {"command": "work"}})
+                assert res.encoding is None
+                assert isinstance(res.tensors, torch.Tensor) and res.tensors.shape == (2, 3)
+                assert res.meta == {"k": "v"}
+                print("  OK  -- torch tensor + JSON still auto-decoded")
+            finally:
+                b.close()
 
         # ------------------------------------------------------------- unit
         unit_roundtrips()

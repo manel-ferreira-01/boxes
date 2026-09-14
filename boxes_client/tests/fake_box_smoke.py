@@ -25,7 +25,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import grpc
 import grpc_reflection.v1alpha.reflection as grpc_reflection
-import torch
+try:
+    import torch
+except ImportError:  # optional extra -- the torch-dependent case 1 is then skipped
+    torch = None
 
 from boxes_client._pb_loader import get as _get_pb
 from boxes_client import Box, trace
@@ -107,19 +110,24 @@ def main() -> int:
         # ------------------------------------------------------------- case 1
         # tapnext: existing behavior (images -> tracks/visibles).
         print("\n== case 1: tapnext trace (images in, tracks out) ==")
-        b = Box(f"127.0.0.1:{tap_port}")
-        try:
-            info = b.info()
-            assert info["reachable"], f"info: {info}"
-            assert info["reflection"], f"info: {info}"
-            frames = [b"jpeg-frame-%d" % i for i in range(4)]
-            res = trace(b, images=frames, grid_size=10)
-            assert res.config.get("tapnext", {}).get("status") == "done"
-            assert res.tracks.shape == (4, 16, 2), res.tracks.shape
-            assert res.visibles.shape == (4, 16)
-            print("  OK  -- tracks", res.tracks.shape, "visibles", res.visibles.shape)
-        finally:
-            b.close()
+        if torch is None:
+            print("  SKIP -- torch not installed (pip install 'boxes-client[torch]')")
+            b = None
+        else:
+            b = Box(f"127.0.0.1:{tap_port}")
+        if b is not None:
+            try:
+                info = b.info()
+                assert info["reachable"], f"info: {info}"
+                assert info["reflection"], f"info: {info}"
+                frames = [b"jpeg-frame-%d" % i for i in range(4)]
+                res = trace(b, images=frames, grid_size=10)
+                assert res.config.get("tapnext", {}).get("status") == "done"
+                assert res.tracks.shape == (4, 16, 2), res.tracks.shape
+                assert res.visibles.shape == (4, 16)
+                print("  OK  -- tracks", res.tracks.shape, "visibles", res.visibles.shape)
+            finally:
+                b.close()
 
         # ------------------------------------------------------------- case 2
         # Generic Box.run() against a *non-image* box (sentences).
