@@ -85,9 +85,10 @@ _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 _IDLE_TIMEOUT = 120  # seconds of global inactivity before the model parks on CPU
 _DEFAULT_SESSION = "default"
 # Time-of-day a given student session may sit idle before it (and its GPU state)
-# is reaped. Default: keep sessions forever (classroom mode). Set e.g. 1800 to
-# reclaim per-session VRAM on shared GPUs; 0 disables reaping entirely.
-_SESSION_TTL = float(os.getenv("TAPNEXT_SESSION_TTL", "0"))
+# is reaped. Default: 1800 s — reclaims per-session VRAM on the shared GPU
+# while a classroom session (few-minute pauses) survives. Set 0 to keep
+# sessions forever (e.g. overnight work that must persist).
+_SESSION_TTL = float(os.getenv("TAPNEXT_SESSION_TTL", "1800"))
 
 logging.basicConfig(
     format='[ %(levelname)s ] %(asctime)s (%(module)s) %(message)s',
@@ -107,7 +108,7 @@ class Session:
     """
 
     __slots__ = (
-        "tracking_state", "active_tracks", "track_histories", "next_track_id",
+        "tracking_state", "active_tracks", "next_track_id",
         "frame_counter", "initialized", "full_tracking_data",
         "accumulated_tracks", "accumulated_visibles", "last_used", "lock",
     )
@@ -115,7 +116,6 @@ class Session:
     def __init__(self):
         self.tracking_state = None
         self.active_tracks = {}
-        self.track_histories = {}
         self.next_track_id = 0
         self.frame_counter = 0
         self.initialized = False
@@ -182,7 +182,6 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         """Reset one session's tracking state. Caller holds no lock (or L1)."""
         sess.tracking_state = None
         sess.active_tracks = {}
-        sess.track_histories = {}
         sess.next_track_id = 0
         sess.frame_counter = 0
         sess.initialized = False
@@ -416,8 +415,6 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         frame_tensor = torch.from_numpy(frame_resized).float() / 255.0
         frame_tensor = frame_tensor.unsqueeze(0).unsqueeze(0).to(self._device)
 
-        current_frame_idx = sess.frame_counter
-
         with torch.no_grad():
             use_amp = (self._device == "cuda")
             with torch.amp.autocast(self._device, dtype=torch.float16, enabled=use_amp):
@@ -445,12 +442,8 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
 
                     num_feats = tracks.shape[2]
                     for i in range(num_feats):
-                        tid = sess.next_track_id
+                        sess.active_tracks[i] = sess.next_track_id
                         sess.next_track_id += 1
-                        sess.active_tracks[i] = tid
-                        vis = visible_logits[0, 0, i].item() > 0
-                        pos = tracks[0, 0, i, :2].cpu() if vis else None
-                        sess.track_histories[tid] = [(current_frame_idx, pos)]
 
                     sess.initialized = True
                 else:
@@ -459,13 +452,6 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                         video=frame_tensor,
                         state=sess.tracking_state
                     )
-
-                    visible = (visible_logits[0, 0] > 0).cpu()
-                    for i in range(tracks.shape[2]):
-                        tid = sess.active_tracks.get(i, None)
-                        if tid is not None:
-                            pos = tracks[0, 0, i, :2].cpu() if visible[i] else None
-                            sess.track_histories[tid].append((current_frame_idx, pos))
 
                 sess.frame_counter += 1
 

@@ -155,9 +155,9 @@ b.run(config={"tapnext": {"command": "list"}})
 Notes:
 - Omitting `session_id` (or sending `null`) runs in the shared **`default`**
   session — the pre-multi-session behaviour, so existing callers are untouched.
-- A session stays alive until it is reset, reaped by `TAPNEXT_SESSION_TTL` (see
-  env vars), or the box is restarted. By default sessions are kept forever,
-  which is what you want in a classroom.
+- A session stays alive until it is reset, reaped after `TAPNEXT_SESSION_TTL`
+  idle time (default 1800 s — see env vars), or the box is restarted.
+  Set it to 0 to keep sessions forever (e.g. overnight work).
 - The `session_id` is a capability: anyone who can reach the box port and knows
   an id can continue or reset that session (fine on a trusted LAN — do not
   publish unknown ids publicly if you don't trust the audience). `list` lets
@@ -259,7 +259,7 @@ docker run --gpus all \
 | `PORT` | 8061 | Server listening port |
 | `TORCH_HOME` | /workspace/.cache | PyTorch model cache directory |
 | `HF_HOME` | /workspace/.cache | HuggingFace cache directory |
-| `TAPNEXT_SESSION_TTL` | 0 (keep forever) | Seconds a session may sit idle before it (and its per-session GPU state) is reaped. 0 disables reaping — the right choice for a classroom where students' work must persist. Raise it (e.g. 1800) on a shared GPU to reclaim VRAM from abandoned sessions. |
+| `TAPNEXT_SESSION_TTL` | 1800 | Seconds a session may sit idle before it (and its per-session GPU state) is reaped. 1800 keeps a classroom's pauses alive on a shared GPU while abandoned sessions still get reclaimed. Set it higher for longer student pauses; 0 disables reaping (sessions persist until reset/restart). |
 
 ## Performance Notes
 
@@ -269,8 +269,9 @@ docker run --gpus all \
 - Track state persists across sequential frames for a session until that session
   is reset or reaped
 - With multiple sessions the shared model is loaded once; each session adds a
-  small per-session state cost. Reap idle sessions with `TAPNEXT_SESSION_TTL`
-  if many sessions accumulate on one GPU.
+  per-session state cost that grows with the video length. Idle sessions are
+  reaped after `TAPNEXT_SESSION_TTL` (default 1800 s); raise it or set 0 if
+  student work must persist longer. Reap more aggressively on a crowded GPU.
 
 ## Testing
 
