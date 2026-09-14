@@ -10,7 +10,7 @@ ARG SERVICE_NAME=sbert
 # Builder stage to generate .proto files
 # --------------------------------------
 
-FROM python:slim-buster AS builder
+FROM python:slim-buster@sha256:c46b0ae5728c2247b99903098ade3176a58e274d9c7d2efeaaab3e0621a53935 AS builder
 #FROM python:latest as builder
 ## Renew build args
 ARG WORKSPACE
@@ -36,7 +36,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. pipeline.
 
 # Using runtime image instead of devel to reduce size (~4GB savings)
 # Runtime only includes libraries needed to run CUDA apps, not compiler headers
-FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04
+FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04@sha256:94c1577b2cd9dd6c0312dc04dff9cb2fdce2b268018abc3d7c2dbcacf1155000
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME

@@ -69,8 +69,6 @@ docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_lang_segm
 | vggt | GPU | 3D reconstruction from image sequences |
 | yologpt | GPU | YOLOv11 detection & tracking |
 | opencv_box | GPU / CPU | Optical flow, feature matching, similarity checks |
-| folder_wd | CPU | File-watcher: watches a directory, drives boxes, saves outputs |
-| gradio_display | CPU | Gradio UI: upload/images, drive boxes, display results |
 
 **The per-box README is the authoritative source for that box's request shape**
 (config keys, fields, status, how to decode `results`):

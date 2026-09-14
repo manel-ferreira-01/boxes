@@ -7,7 +7,7 @@ ARG SRC_DIR=src
 # -------------------------------
 # Builder to generate python code
 # -------------------------------
-FROM python:3.10-slim AS proto_builder
+FROM python:3.10-slim@sha256:fd76ade0c607f27677bc04be3c60749f400eedc941d9e72967e19a4cedff80c2 AS proto_builder
 # Renew build args
 ARG WORKSPACE
 ARG PROTO_FILE
@@ -31,7 +31,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ${PROTO_F
 # ------------------------------
 # Final image to run the service
 # ------------------------------
-FROM ultralytics/ultralytics:latest
+FROM ultralytics/ultralytics@sha256:0ef840cf49609a29a329f93813a397e4b5613d40b3565fbaac0fbd0e0ba8689b
 #FROM python:3.10-slim 
 # Renew build args
 ARG USER

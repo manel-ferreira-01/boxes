@@ -1,12 +1,18 @@
 name: boxes-fleet
 
-# Launch a bunch of boxes (prebuilt sipgisr images) side by side, all on the
-# shared `pipeline.PipelineService` interface, each on its own host port.
+# Launch a bunch of boxes (prebuilt images from GitHub Container Registry)
+# side by side, all on the shared `pipeline.PipelineService` interface, each
+# on its own host port.
 #
-#   docker compose up -d          # start the fleet
+#   docker compose up -d          # start the fleet (docker pull ghcr.io/…)
 #   docker compose ps             # watch them come up
 #   python hello.py               # reach every box with ONE generic pattern
 #   docker compose down           # tear it down
+#
+# Image versions: `:latest` follows the last published `boxes-v*` tag. For a
+# fully reproducible fleet, replace each tag with the immutable digest from
+# the `report digests` job of the publish workflow, e.g.
+#   ghcr.io/manel-ferreira-01/clip@sha256:…
 #
 # All boxes listen on 8061 internally; we map distinct host ports (906x).
 # GPU: each box requests the nvidia devices. To run the fleet on a CPU-only
@@ -26,7 +32,7 @@ services:
 
   clip:
     <<: *gpu
-    image: sipgisr/clip:latest
+    image: ghcr.io/manel-ferreira-01/clip:latest
     container_name: box-clip
     ports: ["9061:8061"]
     environment: [ PORT=8061 ]
@@ -34,7 +40,7 @@ services:
 
   textembedding:
     <<: *gpu
-    image: sipgisr/textembedding:latest
+    image: ghcr.io/manel-ferreira-01/textembedding:latest
     container_name: box-textembedding
     ports: ["9062:8061"]
     environment: [ PORT=8061 ]
@@ -42,7 +48,7 @@ services:
 
   tapnext:
     <<: *gpu
-    image: sipgisr/tapnexttracker:latest
+    image: ghcr.io/manel-ferreira-01/tapnext_tracker:latest
     container_name: box-tapnext
     ports: ["9063:8061"]
     environment: [ PORT=8061 ]
@@ -50,7 +56,7 @@ services:
 
   lang_segm:
     <<: *gpu
-    image: sipgisr/lang_sam:latest
+    image: ghcr.io/manel-ferreira-01/lang_segm:latest
     container_name: box-lang_sam
     ports: ["9064:8061"]
     environment: [ PORT=8061 ]
@@ -58,7 +64,7 @@ services:
 
   opencv:
     <<: *gpu
-    image: sipgisr/opencvbox:latest
+    image: ghcr.io/manel-ferreira-01/opencv_box:latest
     container_name: box-opencv
     ports: ["9065:8061"]
     environment: [ PORT=8061 ]

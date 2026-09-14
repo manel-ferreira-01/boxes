@@ -487,3 +487,62 @@ Before deploying:
 - [ ] gRPC reflection enabled
 - [ ] Large message sizes configured (options with -1)
 - [ ] GPU memory management if using CUDA
+
+---
+
+## Publishing to GitHub Container Registry (GHCR)
+
+The fleet's images are published from this repo by the
+`publish boxes` workflow (`.github/workflows/publish-boxes.yml`), not by hand.
+Local `docker build` is for development; the registry is the source of truth
+for `docker pull`.
+
+### Publish
+
+```bash
+git tag boxes-v0.1.0
+git push origin boxes-v0.1.0
+```
+
+That builds and pushes every publishable box to
+`ghcr.io/<owner>/<box>:0.1.0` **and** `:latest` (public repo ⇒ free storage).
+You can also trigger the workflow from Actions with an arbitrary version string
+(`0.1.0-dev1`) without creating a tag.
+
+### Reproducible builds
+
+Every Dockerfile's `FROM` base is **pinned by digest**
+(`…@sha256:…`), so a published tag produces the same image no matter when or
+where it is rebuilt. When you bump a base image, update the digest in the
+Dockerfile **and** commit that change so the published tag and the source
+agree.
+
+### Pulling / pinning a fleet
+
+```bash
+docker pull ghcr.io/<owner>/tapnext_tracker:0.1.0
+docker run --rm --gpus all -p 8063:8061 ghcr.io/<owner>/tapnext_tracker:0.1.0
+```
+
+For a bit-for-bit reproducible fleet, pin the **digest** instead of the tag —
+the `report digests` job prints a ready block of `ghcr.io/<owner>/<box>@sha256:…`
+lines you can drop into `fleet/docker-compose.yml`.
+
+### What is (and isn't) published
+
+- Published: `clip`, `tapnext_tracker`, `lang_segm`, `textembedding`,
+  `opencv_box`, `yologpt` (the six in the workflow matrix).
+- **Not published**: `vggt` — its vendored model package
+  `images/vggt/src/vggt/` is missing from the repo, so it doesn't build until
+  that package is restored (see the exclusion comment in the workflow).
+- Removed: `folder_wd` and `gradio_display` were retired and deleted.
+
+### Costs
+
+- Public repo ⇒ GHCR storage and bandwidth are free; pulling needs no login.
+- Builds run on public runners (2 concurrent). A full publish is ~15-30 min and
+  consumes part of the free monthly runner-minute quota — run it per release,
+  not per commit.
+- No shared build cache is used (the GHA cache quota is far too small for the
+  8 GB CUDA base layers); that is why a publish rebuilds from scratch.
+

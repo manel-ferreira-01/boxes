@@ -5,14 +5,14 @@ ARG WORKSPACE=/workspace
 # proto file as well as the python file with the server
 # The proto file should have the name ${SERVICE_NAME}.proto
 # The python file should have the name ${SERVICE_NAME}_service.py
-ARG SERVICE_NAME=simplebox
+ARG SERVICE_NAME=opencv
 
 
 # --------------------------------------
 # Builder stage to generate .proto files
 # --------------------------------------
 
-FROM python:3.10.18-slim-bullseye AS builder
+FROM python:3.10.18-slim-bullseye@sha256:f1fb49e4d5501ac93d0ca519fb7ee6250842245aba8612926a46a0832a1ed089 AS builder
 #FROM python:latest as builder
 ## Renew build args
 ARG WORKSPACE
@@ -35,7 +35,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. pipeline
 # Stage to generate final image
 # -----------------------------
 
-FROM python:3.10.18-slim-bullseye 
+FROM python:3.10.18-slim-bullseye@sha256:f1fb49e4d5501ac93d0ca519fb7ee6250842245aba8612926a46a0832a1ed089
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME

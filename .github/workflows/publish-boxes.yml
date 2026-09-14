@@ -1,0 +1,117 @@
+# Build and publish the box fleet to GitHub Container Registry (GHCR).
+#
+# Publish:
+#     git tag boxes-v0.1.0
+#     git push origin boxes-v0.1.0
+#
+# ...or trigger manually from Actions with an arbitrary version string
+# (e.g. "0.1.0-dev1") without creating a git tag.
+#
+# Result: ghcr.io/<owner>/<box>:<version> and :latest for every buildable box.
+# Image base layers are pinned by digest in the Dockerfiles, so a published
+# tag reproduces bit-for-bit no matter when (and where) it is pulled.
+#
+# Costs: public repo -> GHCR storage is free. Builds run on 2 concurrent
+# public runners; a full publish takes ~15-30 min (no shared cache: the
+# GHA cache quota is far too small for 8 GB CUDA images).
+
+name: publish boxes
+
+on:
+  push:
+    tags:
+      - "boxes-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to publish as (e.g. 0.1.0)"
+        required: true
+        default: "0.0.1"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: "publish ${{ matrix.box }}"
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing box must not block the rest from publishing.
+      fail-fast: false
+      matrix:
+        # One entry per publishable box (directory names under images/,
+        # lower-cased — that is also the GHCR image name).
+        #
+        # vggt is EXCLUDED: its vendored model package `images/vggt/src/vggt/`
+        # is missing from the repo (see images/vggt/src/vggt_service.py), so
+        # the image cannot build. Restore that package to re-add "vggt" here.
+        box: [clip, tapnext_tracker, lang_segm, textembedding, opencv_box, yologpt]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ver="$INPUTS_TAG"
+          else
+            ver="${GITHUB_REF_NAME#boxes-v}"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "publishing tag: $ver"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: "images/${{ matrix.box }}"
+          file: "images/${{ matrix.box }}/docker/Dockerfile"
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.box }}:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.box }}:latest
+
+  # Print the immutable digests so the fleet compose can be pinned to them:
+  #     docker buildx imagetools inspect ghcr.io/<owner>/<box>:<version>
+  report-digests:
+    name: "report digests"
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ver="$INPUTS_TAG"
+          else
+            ver="${GITHUB_REF_NAME#boxes-v}"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Print digests
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "Pin fleet/docker-compose.yml to these digests for a fully reproducible fleet:"
+          for box in clip tapnext_tracker lang_segm textembedding opencv_box yologpt; do
+            d=$(docker buildx imagetools inspect "ghcr.io/${OWNER}/${box}:${VER}" 2>/dev/null \
+                | awk '/^Digest:/{print $2}')
+            echo "  $box -> ghcr.io/${OWNER}/${box}@${d:-<push failed — check that job>}"
+          done
+        

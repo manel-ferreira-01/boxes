@@ -70,7 +70,6 @@ Use them; don't hand-roll the oneof.
 | opencv_box | `opencv` | `Process` + `similarity_check` |
 | vggt | flat (`parameters` at top level) | legacy; response uses `VGGT` section |
 | yologpt | flat (`stream`, etc.) | legacy; its own RPCs |
-| folder_wd / gradio_display | mixed (`opencv`, `aispgradio`, …) | orchestration layers, not "standard" boxes |
 
 **Legacy flat form**: boxes written before the convention read
 `config_json` directly (`{"parameters": {...}, "stream": 2}`); `lang_segm`
@@ -104,8 +103,8 @@ return Envelope(data={"results": wrap_value(blob)})
 out_list = pickle.loads(zstandard.ZstdDecompressor().decompress(bytes(blob)))
 ```
 
-LangSAM (`lang_segm`) produces it; `folder_wd` consumes it — that's a real
-cross-box contract.
+LangSAM (`lang_segm`) produces it — a cross-box contract: any consumer box
+(or the client) can decode it.
 
 **Declared encoding (the contract, not a guess).** Boxes describe their
 payload in the response `config_json` with the generic `"encoding"` key:
@@ -149,7 +148,7 @@ Standard boxes answer `Process` with a namespaced status:
 - **`empty_request`** — the `images` field was missing/empty.
 - **`error`** — missing config, no prompt, or inference failure; the human
   readable reason is in `"error"`.
-- **Config-only echo** — some boxes (opencv, vggt, folder_wd) forward
+- **Config-only echo** — some boxes (opencv, vggt) forward
   config-only envelopes without images and echo them back unchanged; callers
   treat an empty `data` as "no work, continue".
 

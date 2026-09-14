@@ -1,8 +1,0 @@
-grpcio
-protobuf
-grpcio-reflection
-grpcio-status
-numpy
-watchdog
-opencv-python-headless
-zstandard

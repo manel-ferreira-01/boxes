@@ -9,7 +9,7 @@ stop it, move it to another machine, or run several of them side by side
 without the others noticing.
 
 ```
-   caller (boxes_client / gradio_display / folder_wd)
+   caller (boxes_client or any orchestration layer)
         │  gRPC  Envelope → Envelope
         ▼
    ┌───────────┐   ┌───────────┐   ┌───────────┐
@@ -18,8 +18,8 @@ without the others noticing.
         each box:   proto + service.py + model, listening on :8061
 ```
 
-The calling side does the orchestration: `boxes_client` (or a UI box such as
-`gradio_display`) dials the box it needs, directly, by `ip:port`. That keeps
+The calling side does the orchestration: `boxes_client` (or any other
+process) dials the box it needs, directly, by `ip:port`. That keeps
 the boxes independent and restartable and preserves the distributed nature of
 the fleet.
 
@@ -37,8 +37,7 @@ Full request/response contract: see
 [gRPC_Services_Reference](gRPC_Services_Reference.md).
 
 A few boxes predate the shared contract and use extra RPCs (`yologpt`'s
-`DetectSequence`/`TrackSequence`, `opencv_box`'s `similarity_check`,
-`gradio_display`'s `DisplayService`); they still move `Envelope`s around and
+`DetectSequence`/`TrackSequence`, `opencv_box`'s `similarity_check`); they still move `Envelope`s around and
 can be called through `boxes_client.run(..., method=...)` where the client
 vendored proto allows it.
 
@@ -111,8 +110,8 @@ print(res.config, res.tracks)
 ```
 
 No registry, no central server: local and remote boxes are the same call.
-`gradio_display` and `folder_wd` exist as two concrete orchestration layers
-(UI-driven and file-watcher-driven) built on the same Envelope.
+Orchestration (calling several boxes in sequence) is the caller's job —
+`fleet/hello.py` is the minimal multi-box walkthrough.
 
 ## Retired
 
