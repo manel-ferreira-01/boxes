@@ -51,7 +51,7 @@ RUN addgroup --system ${GROUP} && \
 #    libgl1-mesa-glx \
 #    libglib2.0-0 \
 #    && rm -rf /var/lib/apt/lists/*
-RUN apt update && apt install -y   libgl1-mesa-glx libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y   libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
     pip install grpcio grpcio-reflection  lap

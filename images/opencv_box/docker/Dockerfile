@@ -12,7 +12,7 @@ ARG SERVICE_NAME=opencv
 # Builder stage to generate .proto files
 # --------------------------------------
 
-FROM python:3.10.18-slim-bullseye@sha256:f1fb49e4d5501ac93d0ca519fb7ee6250842245aba8612926a46a0832a1ed089 AS builder
+FROM python:3.10-slim@sha256:fd76ade0c607f27677bc04be3c60749f400eedc941d9e72967e19a4cedff80c2 AS builder
 #FROM python:latest as builder
 ## Renew build args
 ARG WORKSPACE
@@ -35,7 +35,7 @@ RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. pipeline
 # Stage to generate final image
 # -----------------------------
 
-FROM python:3.10.18-slim-bullseye@sha256:f1fb49e4d5501ac93d0ca519fb7ee6250842245aba8612926a46a0832a1ed089
+FROM python:3.10-slim@sha256:fd76ade0c607f27677bc04be3c60749f400eedc941d9e72967e19a4cedff80c2
 # Renew build args
 ARG WORKSPACE
 ARG SERVICE_NAME
@@ -58,7 +58,7 @@ ENV XDG_CACHE_DIR=/workspace/.xcache
 # Install requirements
 COPY requirements.txt .
 RUN apt update -y && \
-    apt install -y pip git gcc python3-dev libgl1-mesa-glx libglib2.0-0 &&\
+    apt install -y pip git gcc python3-dev libgl1 libglib2.0-0 &&\
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
