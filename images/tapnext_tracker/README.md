@@ -7,6 +7,9 @@ A gRPC service for TAPNext point tracking with streaming support, following the 
 - Frame-by-frame tracking with state preservation
 - Grid-based query point detection on first frame
 - Server-side track accumulation until reset
+- **Multi-session (multi-tenant)**: one box serves many independent users at
+  once — each `session_id` holds its own state, its own reset, and its own
+  accumulation (see [Sessions](#sessions-sharing-one-box-with-many-users))
 - CUDA-accelerated inference using JAX/PyTorch backend
 - Configurable grid size for query point density
 
@@ -60,7 +63,9 @@ The service uses the shared `PipelineService` interface with `Envelope` messages
 
 #### Reset Tracking State (one-time initialization)
 
-Reset clears any previous tracking state before starting a new sequence:
+Reset clears previous tracking state before starting a new sequence. Reset is
+**scoped to a session**: without a `session_id` it clears the shared `default`
+session; pass one and only that user's state is touched (others keep running):
 
 ```python
 import grpc
@@ -73,7 +78,7 @@ stub = proto.PipelineServiceStub(channel)
 
 request = proto.Envelope(
     config_json=json.dumps({
-        "tapnext": {"command": "reset"}
+        "tapnext": {"command": "reset"}          # + "session_id": "alice-2025" to scope
     })
 )
 response = stub.Process(request)
@@ -105,11 +110,81 @@ visibles = unwrap_value(response.data["visibles"])
 
 Each frame you send continues from the previous tracking state. No reset flag needed between frames.
 
+### Sessions (sharing one box with many users)
+
+The box is **multi-tenancy-ready**: every request can carry a `session_id`
+(inside the `tapnext` config section). All requests with the same `session_id`
+see the same tracking state; different ids see only their own — state,
+accumulation, and reset are all scoped per session. No login or registry is
+involved: the id is an opaque **capability string** — knowing it is enough to
+run against that session, and it is the only way to name one.
+
+```python
+from boxes_client import Box
+import pathlib
+
+b = Box("localhost:9063")
+
+# Student "alice" tracks — her session is created on first use
+res = b.run(
+    data   = {"images": [pathlib.Path("frame1.jpg")]},
+    config = {"tapnext": {"command": "track",
+                          "parameters": {"grid_size": 32},
+                          "session_id": "alice-2025"}},
+)
+
+# Student "bob" on the SAME box, same GPU: completely independent
+b.run(data={"images": [pathlib.Path("frame1.jpg")]},
+      config={"tapnext": {"command": "track",
+                          "parameters": {"grid_size": 32},
+                          "session_id": "bob-2025"}})
+
+# Reset is scoped: only alice's session restarts; bob's keeps going
+b.run(config={"tapnext": {"command": "reset", "session_id": "alice-2025"}})
+
+# Operator view: which sessions are alive (sid + frames + idle time, no state)
+b.run(config={"tapnext": {"command": "list"}})
+```
+
+| Behaviour | Single session (no `session_id`) | Named sessions |
+|---|---|---|
+| State/accumulation | one shared `default` session | one per `session_id` |
+| `reset` | clears the `default` session | clears only that session |
+| Back-compat | old clients keep working unchanged | new key, ignored by old boxes |
+
+Notes:
+- Omitting `session_id` (or sending `null`) runs in the shared **`default`**
+  session — the pre-multi-session behaviour, so existing callers are untouched.
+- A session stays alive until it is reset, reaped by `TAPNEXT_SESSION_TTL` (see
+  env vars), or the box is restarted. By default sessions are kept forever,
+  which is what you want in a classroom.
+- The `session_id` is a capability: anyone who can reach the box port and knows
+  an id can continue or reset that session (fine on a trusted LAN — do not
+  publish unknown ids publicly if you don't trust the audience). `list` lets
+  someone who reaches the box enumerate the active ids.
+- The response config echoes which session answered (`"session": "<sid>"`).
+
+#### Sessions in raw gRPC (without the client)
+
+```python
+request = proto.Envelope(
+    config_json=json.dumps({
+        "tapnext": {
+            "command": "track",
+            "parameters": {"grid_size": 32},
+            "session_id": "alice-2025"
+        }
+    }),
+    data={"images": [wrap_value(frame_bytes)]}
+)
+```
+
 ### Configuration Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `command` | string | "track" | Set to "reset" to clear tracking state, "track" for inference |
+| `command` | string | "track" | "track" for inference, "reset" to clear *this session's* tracking state, "list" to see active sessions (operator) |
+| `session_id` | string | `"default"` | Opaque session tag; gives the user a private state. Share an id = share a session |
 | `grid_size` | int | 32 | Number of grid points per dimension (grid_size × grid_size total) |
 
 ### Response Format
@@ -120,9 +195,28 @@ Response includes all tracked points and the Tomasi-Kanade observation matrix:
 {
   "tapnext": {
     "status": "done",
+    "session": "alice-2025",
     "runtime": 0.45,
     "frames_processed": 1,
     "num_points": 1024
+  }
+}
+```
+
+`"session"` echoes the id that answered (or `"default"`), so a client can
+confirm which session it just talked to.
+
+A `list` request returns a config-only envelope (no `data`):
+
+```json
+{
+  "tapnext": {
+    "status": "done",
+    "action": "list",
+    "sessions": [
+      {"session": "alice-2025", "frames_processed": 42, "num_tracks": 1024, "idle_seconds": 3.2},
+      {"session": "bob-2025",   "frames_processed": 7,  "num_tracks": 1024, "idle_seconds": 190.5}
+    ]
   }
 }
 ```
@@ -165,13 +259,37 @@ docker run --gpus all \
 | `PORT` | 8061 | Server listening port |
 | `TORCH_HOME` | /workspace/.cache | PyTorch model cache directory |
 | `HF_HOME` | /workspace/.cache | HuggingFace cache directory |
+| `TAPNEXT_SESSION_TTL` | 0 (keep forever) | Seconds a session may sit idle before it (and its per-session GPU state) is reaped. 0 disables reaping — the right choice for a classroom where students' work must persist. Raise it (e.g. 1800) on a shared GPU to reclaim VRAM from abandoned sessions. |
 
 ## Performance Notes
 
 - First inference call loads the model (~740MB checkpoint)
 - Model stays on GPU after loading unless idle for 120 seconds
 - Grid detection generates (grid_size × grid_size) query points per frame
-- Track state persists across sequential frames until explicitly reset
+- Track state persists across sequential frames for a session until that session
+  is reset or reaped
+- With multiple sessions the shared model is loaded once; each session adds a
+  small per-session state cost. Reap idle sessions with `TAPNEXT_SESSION_TTL`
+  if many sessions accumulate on one GPU.
+
+## Testing
+
+Two test entry points:
+
+```bash
+# In-process session-isolation suite — NO GPU, NO tapnet wheel, NO Docker.
+# Injects a deterministic stub model and exercises Process() directly (plus a
+# real gRPC round-trip). This is the fastest way to prove multi-session
+# isolation/regression.
+cd images/tapnext_tracker/test
+python test_tapnext_sessions.py
+
+# Live smoke test against a running box (needs the real image + a GPU):
+docker build --tag my_tapnext -f docker/Dockerfile .
+docker run --rm --gpus all -p 8061:8061 -v /path/to/ckpt:/workspace/bootstapnext_ckpt.npz my_tapnext &
+cd images/tapnext_tracker/test
+python test_tapnext.py          # sequential tracking over gRPC
+```
 
 ## Troubleshooting
 
