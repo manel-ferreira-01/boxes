@@ -17,6 +17,9 @@ shared gRPC envelope, called by `boxes_client` or by orchestration-layer boxes.
 - **[CODECS](CODECS.md)** — self-describing payload decoding: the `"encoding"`
   contract boxes declare in their response config, the 5 named codecs, the
   legacy fallback, and design rationale.
+- **[Webui_Guide](Webui_Guide.md)** — the declarative web layer over the
+  fleet: webui state, run/build/test loop, def vocabulary, wire rules,
+  gotchas, next steps (replaces the retired `webui/STATUS.md`).
 
 ## Boxes in this repo
 
