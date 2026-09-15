@@ -111,6 +111,7 @@ and `data` carries:
 |--------------|------|-------------|
 | `detections` | `b` (declared `json`) | list with **one record per frame**: see below |
 | `annotated`  | `bb` (declared `identity`) | JPEG-annotated frame per input frame (only when `save_annotated`) |
+| `annotated_video` | `b` (declared `identity`) | **video input only**: the same annotated frames re-encoded as one MP4 (`mp4v`, source fps) — a video in, a video out. Absent when an image/video writer is unavailable (the JPEG list still carries the frames) |
 
 A detection record (plain JSON):
 

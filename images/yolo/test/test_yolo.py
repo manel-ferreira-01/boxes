@@ -169,8 +169,7 @@ def main():
             config_json=json.dumps({
                 "yolo": {
                     "command": "detect",
-                    "parameters": {"conf": 0.25, "frame_step": 30,
-                                   "max_frames": 8, "save_annotated": False},
+                    "parameters": {"conf": 0.25, "frame_step": 30, "max_frames": 8},
                 }
             }),
             data={"video": aux.wrap_value(video_bytes)},
@@ -187,7 +186,7 @@ def main():
                 detections = json.loads(aux.unwrap_value(response.data["detections"]).decode("utf-8"))
                 total = print_detections(detections)
                 print(f"  {section.get('frames_sampled')}/{section.get('frames_in_video')} frames sampled, "
-                      f"{total} detections; 'annotated' present: {'annotated' in response.data} (save_annotated=false)")
+                      f"{total} detections")
                 idxs = [d["frame_index"] for d in detections]
                 if idxs != [i * 30 for i in range(len(idxs))]:
                     print(f"  frame_index spacing wrong: {idxs}")
@@ -195,6 +194,35 @@ def main():
             else:
                 print("  missing field: detections")
                 failures.append("video detections missing")
+
+            # save_annotated (default on): JPEG list + one annotated mp4
+            ann = aux.unwrap_value(response.data["annotated"]) if "annotated" in response.data else None
+            av = aux.unwrap_value(response.data["annotated_video"]) if "annotated_video" in response.data else None
+            if not ann or not isinstance(ann, list) or len(ann) != len(detections if "detections" in response.data else []):
+                failures.append("video annotated missing/wrong shape")
+            if not isinstance(av, (bytes, bytearray)) or bytes(av)[4:8] != b"ftyp":
+                print(f"  annotated_video: not an mp4 ({type(av)})")
+                failures.append("video annotated_video")
+            else:
+                print(f"  annotated: {len(ann)} JPEGs; annotated_video: {len(av)} bytes mp4")
+
+            # save_annotated=false drops both
+            r2 = stub.Process(pipeline_pb2.Envelope(
+                config_json=json.dumps({
+                    "yolo": {"command": "detect",
+                             "parameters": {"frame_step": 30, "max_frames": 1,
+                                            "save_annotated": False}},
+                }),
+                data={"video": aux.wrap_value(video_bytes)},
+            ))
+            s2 = check_status(r2)
+            if s2 is None:
+                failures.append("video save_annotated=fail status")
+            elif "annotated" in r2.data or "annotated_video" in r2.data:
+                print("  save_annotated=false did not drop the annotated fields")
+                failures.append("video save_annotated=false")
+            else:
+                print("  save_annotated=false: no annotated fields (ok)")
 
     # ------------------------------------------------------------------ #
     # Case 4: weights switch (optional — needs a fetchable checkpoint)    #

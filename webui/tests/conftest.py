@@ -219,6 +219,8 @@ def fake_yolo(std_pb):
 
     ENCODING = {"detections": "json", "annotated": "identity"}
     JPEG_MAGIC = b"\xff\xd8\xff\xe0"
+    # ftyp at offset 4 -> the serializer sniffs this as video/mp4
+    MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32
 
     def jpeg(n: int) -> bytes:
         return JPEG_MAGIC + f"fake-annotated-{n}".encode() + b"\x00" * 64
@@ -253,6 +255,8 @@ def fake_yolo(std_pb):
                     {"yolo": {"status": "empty_request"}}))
 
             imgsz = int(params.get("imgsz") or 640)  # accepted for shape fidelity
+            env_encoding = dict(ENCODING)
+            annotated_video = None
             if video:
                 # emulate server-side decode + frame_step sampling (no real
                 # frames available here; we just report a believable shape
@@ -267,6 +271,8 @@ def fake_yolo(std_pb):
                     n += 1
                 status = {"source": "video", "frames_in_video": 211,
                           "frame_step": step}
+                env_encoding = dict(ENCODING, annotated_video="identity")
+                annotated_video = MP4
             else:
                 list_imgs = list(imgs)
                 detections, annotated = [], []
@@ -280,10 +286,12 @@ def fake_yolo(std_pb):
                          "runtime": 0.42, "num_frames": len(detections),
                          "frames_sampled": len(detections),
                          "num_detections": len(detections),
-                         "encoding": ENCODING, **status}}))
+                         "encoding": env_encoding, **status}}))
             env.data["detections"].CopyFrom(
                 aux.wrap_value(json.dumps(detections).encode("utf-8")))
             env.data["annotated"].CopyFrom(aux.wrap_value(annotated))
+            if "annotated_video" in env_encoding:
+                env.data["annotated_video"].CopyFrom(aux.wrap_value(annotated_video))
             return env
 
     return FakeBox(FakeYolo(), pb2, pb2_grpc)

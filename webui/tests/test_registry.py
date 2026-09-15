@@ -113,7 +113,8 @@ def test_yolo_detection_def(reg):
     params = {p.key for p in d.parameters}
     assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
-    assert viz == {"annotated": "image_grid", "detections": "table"}
+    assert viz == {"annotated_video": "video", "annotated": "image_grid",
+                   "detections": "table"}
 
 
 def test_non_process_refused():

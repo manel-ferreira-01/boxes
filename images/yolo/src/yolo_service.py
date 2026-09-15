@@ -227,9 +227,9 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
     def _decode_video(self, video_bytes, frame_step, max_frames):
         """Server-side decode: (sampled BGR frames, their original indices,
-        total frame count).  The total comes from the container metadata
-        (``CAP_PROP_FRAME_COUNT``) when the codec provides it, else falls
-        back to the number of frames actually decoded before the
+        total frame count, source fps).  The total comes from the container
+        metadata (``CAP_PROP_FRAME_COUNT``) when the codec provides it, else
+        falls back to the number of frames actually decoded before the
         ``max_frames`` cap."""
         suffix = _sniff_video_ext(video_bytes)
         tmp_path = None
@@ -248,6 +248,12 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 meta_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             except (TypeError, ValueError):
                 meta_total = 0
+            try:
+                fps = float(cap.get(cv2.CAP_PROP_FPS) or 0)
+            except (TypeError, ValueError):
+                fps = 0.0
+            if not (fps > 0) or fps != fps:      # NaN guard
+                fps = 30.0
 
             frames, indices = [], []
             decoded = 0
@@ -260,7 +266,42 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                     indices.append(decoded)
                 decoded += 1
             cap.release()
-            return frames, indices, (meta_total if meta_total > 0 else decoded)
+            return frames, indices, (meta_total if meta_total > 0 else decoded), fps
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _encode_annotated_video(annotated_frames, fps):
+        """Encode annotated BGR frames into one MP4 (``mp4v`` fourcc).
+
+        Returns the mp4 bytes, or ``None`` when the writer is unavailable
+        (degrade, never fail the call — the JPEG list still carries the
+        frames)."""
+        if not annotated_frames:
+            return None
+        h, w = annotated_frames[0].shape[:2]
+        tmp_path = None
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            writer = cv2.VideoWriter(
+                tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+            if not writer.isOpened():
+                return None
+            for frame in annotated_frames:
+                writer.write(frame)
+            writer.release()
+            with open(tmp_path, "rb") as f:
+                data = f.read()
+            return data if data else None
+        except (OSError, cv2.error):
+            logging.exception("annotated_video encoding failed")
+            return None
         finally:
             if tmp_path:
                 try:
@@ -344,8 +385,9 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
             source = "images"
             extra_status = {}
+            fps = 0.0
             if video_bytes:
-                frames, frame_indices, total_frames = self._decode_video(
+                frames, frame_indices, total_frames, fps = self._decode_video(
                     video_bytes, spec["frame_step"], spec["max_frames"])
                 source = "video"
                 extra_status = {
@@ -382,15 +424,23 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
             encoding = {"detections": "json"}
 
             if spec["save_annotated"]:
-                annotated = []
+                annotated_bgr, annotated = [], []
                 for r in results:
-                    rgb = r.plot()
-                    ok, buf = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR),
+                    bgr_frame = cv2.cvtColor(r.plot(), cv2.COLOR_RGB2BGR)
+                    annotated_bgr.append(bgr_frame)
+                    ok, buf = cv2.imencode(".jpg", bgr_frame,
                                            [int(cv2.IMWRITE_JPEG_QUALITY), 90])
                     if ok:
                         annotated.append(buf.tobytes())
                 response_data["annotated"] = wrap_value(annotated)
                 encoding["annotated"] = "identity"
+                if source == "video":
+                    # A video in -> a real video out: the same annotated
+                    # frames re-encoded as one mp4 (source fps).
+                    out_video = self._encode_annotated_video(annotated_bgr, fps)
+                    if out_video:
+                        response_data["annotated_video"] = wrap_value(out_video)
+                        encoding["annotated_video"] = "identity"
 
             return pipeline_pb2.Envelope(
                 config_json=json.dumps({

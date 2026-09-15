@@ -40,6 +40,7 @@ VISUALIZERS: frozenset[str] = frozenset({
     "field_map",      # per-item numeric map as an image (H×W heat or H×W×3 RGB)
     "tensor",         # shape/dtype/summary of a numeric array
     "glb",            # glTF binary 3D model (three.js)
+    "video",          # video file artifact (mp4/…) -> native <video controls>
     "points",         # per-item point cloud (depth+intrinsics or (…, 3)) → THREE.Points, no 3D file format
     "tracks_player",  # frames + tracks/visibles animation
     "download",       # raw file download

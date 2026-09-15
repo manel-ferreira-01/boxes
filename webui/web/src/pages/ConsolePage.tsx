@@ -718,6 +718,19 @@ function ResultBlock({
         ? <GLBView url={url} title={title} />
         : <div className="note">no glb payload in this response</div>;
     }
+    case "video": {
+      // video file artifact (e.g. an annotated mp4) -> native player
+      const url = isRef(v) ? (v as { url?: string }).url : typeof v === "string" ? v : null;
+      return (
+        <div>
+          {title && <div className="viz-caption">{title}</div>}
+          {url
+            ? <video controls preload="metadata" src={url}
+                     style={{ maxWidth: "100%", maxHeight: 480, background: "#000" }} />
+            : <div className="note">no video payload in this response</div>}
+        </div>
+      );
+    }
     case "points": {
       // per-item point clouds → orbiting three.js scenes; the def names the
       // item props.  Preferred: `depth` (+ `intrinsics`, pixel back-projection);

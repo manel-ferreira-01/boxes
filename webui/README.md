@@ -128,7 +128,7 @@ docstrings). Vocabulary:
 * **widgets** — `image_upload · video_frames · file_upload · tags ·
   text_repeat · slider · select · number · json`
 * **visualizers** — `json (fallback) · table · image_grid · overlay
-  (box/mask/point/flow layers) · matrix · tensor · field_map · glb · points
+  (box/mask/point/flow layers) · matrix · tensor · field_map · glb · video · points
   · tracks_player · download`
   (`points` renders point clouds straight from typed arrays with three.js
   `THREE.Points` — no GLB encoding; `glb` is for real glTF binaries like

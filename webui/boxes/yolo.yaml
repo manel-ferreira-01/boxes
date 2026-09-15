@@ -70,6 +70,9 @@ parameters:
     placeholder: "video: safety cap on decoded frames"
 
 results:
+  - field: annotated_video
+    visualizer: video
+    caption: "annotated frames as one mp4 (video input only; source fps)"
   - field: annotated
     visualizer: image_grid
     caption: "annotated frames (JPEG)"

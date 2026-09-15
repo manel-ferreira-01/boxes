@@ -231,6 +231,14 @@ def test_yolo_full_round_trip(client, fake_yolo):
     v_dets = bv["fields"]["detections"]
     assert [d["frame_index"] for d in v_dets] == [0, 30, 60, 90]   # frame_step spacing
     assert len(bv["fields"]["annotated"]) == 4
+    # video input -> a real video out: mp4 file artifact (the `video` visualizer)
+    av = bv["fields"]["annotated_video"]
+    assert av["kind"] == "file" and av["mime"] == "video/mp4"
+    tok = av["url"].rsplit("/", 1)[-1]
+    g = client.get(f"/api/file/{tok}")
+    assert g.status_code == 200 and g.content[4:8] == b"ftyp"
+    # images calls carry no video out
+    assert "annotated_video" not in body["fields"]
 
     # --- box validation: both fields -> in-band error, no HTTP 500 ---
     rb = client.post("/api/call", json={

@@ -34,7 +34,9 @@ non-`Process` methods with a clear error until then).
 
 Still **unverified in-browser / live**: vggt GLB orbit + tensor cards
 (the API path is covered by `fake_vggt`, but camera auto-fit still needs
-a real reconstruction), pixel-level pass of `overlay`, history click-through.
+a real reconstruction), pixel-level pass of `overlay`, history click-through,
+and a first human pass of yolo's `video` player (API + def + serialization
+verified end-to-end incl. a real 1920×1080 annotated mp4).
 opencv_box intentionally out of scope (pre-contract second RPC); the new
 standard `yolo` box covers object detection via `boxes/yolo.yaml`.
 
@@ -92,8 +94,8 @@ webui/
 * **widgets** — `image_upload · video_frames · file_upload · tags ·
   text_repeat · slider · select · number · json`
 * **visualizers** — `json (fallback) · table · image_grid · overlay
-  (box/mask/point/flow) · matrix · tensor · field_map · glb · points ·
-  tracks_player · download`
+  (box/mask/point/flow) · matrix · tensor · field_map · glb · video ·
+  points · tracks_player · download`
 * result field `"*"` = wildcard fallback, so the UI can never get stuck on a
   field a definition forgot.
 
@@ -122,8 +124,14 @@ Def-driven extras (generic, no box names in code):
   parameter is **omitted** from the wire (the box's auto/default applies).
   Don't fake an auto mode by sending a magic value — the box treats a
   missing key as *use the default*.
+* **`video` result def** — a video file artifact (`video/mp4`/…) plays in a
+  native `<video controls>` player (no codec work: the browser does it).
+  Used by yolo: a video in → `annotated_video` out — the same annotated
+  frames the box draws for the `image_grid`, re-encoded as one mp4 at the
+  source video's fps (`mp4v` fourcc; degrades to just the JPEG list when a
+  writer is unavailable).
 * **`points` result def** — per-item point cloud, orbit/zoom, rendered
-  *directly with three.js `THREE.Points`* — a point cloud is typed arrays,
+  directly with three.js `THREE.Points` — a point cloud is typed arrays,
   so there is **no GLB/glTF encoding at all** (no writer, no blobs, no
   binary layout to debug; `glb` is only for real glTF binaries like the
   vggt scene).  Def params pick the position source: `depth` (+ `intrinsics`,
