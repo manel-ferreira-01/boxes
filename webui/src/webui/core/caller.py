@@ -165,6 +165,10 @@ def build_call(defn: BoxDef, req: CallRequest, store: ArtifactStore) -> CallSpec
             raise CallBuildError(f"missing required parameter {key!r}")
 
     # ---- section-level keys ----------------------------------------------
+    # A "reset" call never carries inputs: required checks (section keys and
+    # data fields) are waived for it — stateful boxes clear their session,
+    # stateless boxes no-op it (fleet convention: every box accepts reset).
+    is_reset = (command == "reset")
     unknown_s = sorted(set(req.section) - set(defn.known_section_keys()))
     if unknown_s:
         raise CallBuildError(
@@ -177,10 +181,11 @@ def build_call(defn: BoxDef, req: CallRequest, store: ArtifactStore) -> CallSpec
             sec[s.key] = req.section[s.key]
         elif s.default is not None:
             sec[s.key] = s.default
-        elif s.required:
+        elif s.required and not is_reset:
             raise CallBuildError(f"missing required section key {s.key!r}")
 
     # ---- data fields -------------------------------------------------------
+
     fields = defn.input_fields()
     unknown_d = sorted(set(req.data) - set(fields))
     if unknown_d:
@@ -192,7 +197,7 @@ def build_call(defn: BoxDef, req: CallRequest, store: ArtifactStore) -> CallSpec
     for fname, f in fields.items():
         v = req.data.get(fname, f.default)
         if v is None:
-            if f.required:
+            if f.required and not is_reset:
                 raise CallBuildError(f"missing required data field {fname!r}")
             continue
         if not f.multiple and isinstance(v, (list, tuple)):

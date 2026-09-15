@@ -2,6 +2,7 @@
 ``boxes_client/tests/fake_box_smoke.py``)."""
 
 import concurrent.futures as futures
+import io
 import json
 import pickle
 import sys
@@ -97,6 +98,61 @@ def fake_lang_sam(std_pb):
             return env
 
     return FakeBox(FakeLangSegm(), pb2, pb2_grpc)
+
+
+@pytest.fixture
+def fake_vggt(std_pb):
+    """Mimics the vggt box contract: images in; torch tensors + raw GLB out,
+    with the declared per-field encoding map (the real box's contract)."""
+    import torch
+    pb2, pb2_grpc, aux = std_pb
+
+    ENCODING = {"world_points": "torch", "depth": "torch",
+                "depth_conf": "torch", "extrinsic": "torch",
+                "intrinsic": "torch", "world_points_conf": "torch",
+                "images": "torch", "glb_file": "identity"}
+
+    def to_bytes(t):
+        buf = io.BytesIO()
+        torch.save(t, buf, pickle_protocol=4)
+        return buf.getvalue()
+
+    class FakeVGGT(pb2_grpc.PipelineServiceServicer):
+        def Process(self, request, context):
+            cfg = json.loads(request.config_json) if request.config_json else {}
+            sc = cfg.get("vggt", cfg)          # namespaced (or legacy flat)
+            if sc.get("command") == "reset":
+                return pb2.Envelope(config_json=json.dumps(
+                    {"vggt": {"status": "done", "action": "reset"}}))
+            imgs = aux.unwrap_value(request.data.get("images"))
+            if not imgs:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"vggt": {"status": "empty_request"}}))
+            env = pb2.Envelope(config_json=json.dumps(
+                {"vggt": {"status": "done", "num_images": len(list(imgs)),
+                          "encoding": ENCODING}}))
+            env.data["world_points"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.rand(17, 3))))
+            env.data["world_points_conf"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.rand(17))))
+            # > 65 536 elements on purpose: exercises the typed-buffer branch
+            # of the serializer (large tensors must NOT degrade to pickle)
+            env.data["depth"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.rand(2, 256, 256))))
+            env.data["depth_conf"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.rand(2, 256, 256))))
+            env.data["extrinsic"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.eye(4).repeat(2, 1, 1))))
+            env.data["intrinsic"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.eye(3).repeat(2, 1, 1))))
+            env.data["images"].CopyFrom(
+                aux.wrap_value(to_bytes(torch.rand(2, 3, 64, 64))))
+            # "glTF" header + a dummy 12-byte binary header would be enough
+            env.data["glb_file"].CopyFrom(
+                aux.wrap_value(b"glTF" + b"\x00\x00\x00\x00" * 8))
+            return env
+
+    return FakeBox(FakeVGGT(), pb2, pb2_grpc)
 
 
 @pytest.fixture(autouse=True)

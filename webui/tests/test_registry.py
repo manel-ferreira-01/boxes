@@ -69,11 +69,14 @@ def test_lang_sam_section_prompt_is_required(reg):
     assert d.box_key == "lang_sam"
 
 
-def test_vggt_flat_and_glb(reg):
+def test_vggt_namespaced_and_glb(reg):
     d = reg.get("vggt")
-    assert d.flat_config and d.box_key is None
+    assert not d.flat_config and d.box_key == "vggt"
+    assert set(d.command.values) == {"reconstruct", "reset"}
+    assert d.command.default == "reconstruct"
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
     assert viz["glb_file"] == "glb"
+    assert viz["depth"] == "tensor"
 
 
 def test_non_process_refused():

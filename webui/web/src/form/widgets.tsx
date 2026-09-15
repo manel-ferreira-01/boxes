@@ -65,6 +65,7 @@ export function Widget(props: WidgetProps) {
         <SelectWidget
           options={(spec as ParamDef).values || []}
           value={typeof value === "string" ? value : (spec.default as string) ?? ""}
+          placeholder={(spec as ParamDef).placeholder || undefined}
           onChange={onChange}
         />
       );
@@ -359,10 +360,13 @@ function SliderWidget({
 // ------------------------------------------------------------------- select
 
 function SelectWidget({
-  options, value, onChange,
-}: { options: string[]; value: string; onChange: (v: string) => void }) {
+  options, value, onChange, placeholder,
+}: { options: string[]; value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
+      {placeholder && value === "" && (
+        <option value="">{placeholder}</option>
+      )}
       {options.map((o) => <option key={o} value={o}>{o}</option>)}
     </select>
   );

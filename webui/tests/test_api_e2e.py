@@ -92,6 +92,43 @@ def test_lang_sam_full_round_trip(client, fake_lang_sam):
     assert g.status_code == 200 and g.content == b"jpeg-bytes"
 
 
+def test_vggt_full_round_trip(client, fake_vggt):
+    """The full panel path: namespaced call, torch-decoded tensors with their
+    full shape, the GLB as a type-sniffed file artifact."""
+    fid = _seed(client, fake_vggt, "vggt lab", "vggt")
+
+    up = [client.post("/api/upload",
+                      files={"file": (f"frame{n}.jpg", io.BytesIO(b"jpeg-n"),
+                                      "image/jpeg")}) for n in (0, 1)]
+    assert all(u.status_code == 201 for u in up), [u.text for u in up]
+    refs = [u.json()["ref"] for u in up]
+
+    r = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"images": refs},
+        "parameters": {"conf_threshold": 25},
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["box"] == "vggt" and body["status"] == "done"
+    assert body["declared_encoding"]["glb_file"] == "identity"
+    assert body["fields"]["world_points"]["shape"] == [17, 3]
+    # large tensor -> typed buffer artifact (not an inline array, not pickle)
+    depth = body["fields"]["depth"]
+    assert depth["kind"] == "buffer" and depth["dtype"] == "float32"
+    assert depth["shape"] == [2, 256, 256] and depth["size"] == 256 * 256 * 2 * 4
+    tok_d = depth["url"].rsplit("/", 1)[-1]
+    raw = client.get(f"/api/file/{tok_d}").content
+    assert len(raw) == depth["size"]
+
+    glb = body["fields"]["glb_file"]
+    assert glb["kind"] == "file" and glb["mime"] == "model/gltf-binary"
+    tok = glb["url"].rsplit("/", 1)[-1]
+    g = client.get(f"/api/file/{tok}")
+    assert g.status_code == 200 and g.content[:4] == b"glTF"
+
+
 def test_box_error_surfaces_as_status(client, std_pb):
     """A box answering status=error is a *successful* call that reports an
     error in-band — the client never raises; the UI must not either."""

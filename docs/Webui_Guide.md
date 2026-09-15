@@ -28,13 +28,14 @@ refuses non-`Process` methods with a clear error until then).
 
 | Layer | State |
 |---|---|
-| Backend | **48/48 tests green** (`python3 -m pytest tests/ -q` from `webui/`), live-verified against the running fleet (clip, lang_sam, tapnext; error paths 400/502) |
+| Backend | **49/49 tests green** (`python3 -m pytest tests/ -q` from `webui/`), live-verified against the running fleet (clip, lang_sam, tapnext; error paths 400/502) + an API-level vggt round trip (`fake_vggt`: namespaced call, torch tensors with full shape, GLB served as `model/gltf-binary`) |
 | Frontend | `tsc --noEmit && vite build` clean; `web/dist` auto-mounted by the FastAPI app (API + `/docs` keep priority) |
 | Session fixes applied | ✅ tab-switch state leakage (console now remounts per def), ✅ video input for tapnext (`video_frames` widget), ✅ tapnext tracks `(y,x)` order corrected + per-frame visibility toggle, ✅ labeled/legend heatmaps (clip), ✅ input mosaic |
 
-Still **unverified in-browser / live**: vggt GLB (no vggt box in the local
-fleet — camera auto-fit pending), pixel-level pass of `overlay` and the 3-D
-`glb` orbit. yologpt/opencv intentionally out of scope.
+Still **unverified in-browser / live**: vggt GLB orbit + tensor cards
+(the API path is covered by `fake_vggt`, but camera auto-fit still needs
+a real reconstruction), pixel-level pass of `overlay`, history click-through.
+yologpt/opencv intentionally out of scope.
 
 ## 3. Run / build / test loop
 
@@ -54,7 +55,7 @@ WEBUI_DATA_DIR=$PWD/data WEBUI_PORT=8090 \
 ```
 
 Fleet seed (local docker fleet): `clip 9061 · sbert 9062 · tapnext 9063 ·
-lang_sam 9064` (see `webui/data/fleet.json`).
+lang_sam 9064 · vggt 9066` (see `webui/data/fleet.json`).
 
 ## 4. Layout
 
@@ -113,6 +114,12 @@ Def-driven extras (generic, no box names in code):
   `visibles` **per frame** — points flagged invisible are dropped (and
   trails into them stop). Session quick-actions (`reset`/`list`) available
   from the def's `session.actions`.
+* **`select` params with no `default`** — render their def `placeholder`
+  text as an extra first option (value `""`), so the form honestly shows
+  "unset/auto" instead of silently displaying the first value. Unset → the
+  parameter is **omitted** from the wire (the box's auto/default applies).
+  Don't fake an auto mode by sending a magic value — the box treats a
+  missing key as *use the default*.
 
 ## 6. Wire rules & serialization (what the SPA must handle)
 
@@ -121,10 +128,17 @@ Def-driven extras (generic, no box names in code):
 * request validated **against the def** — unknown params/section/fields/
   commands → 400 with `known: [...]`;
 * reset semantics: `command: reset` *is* the reset; stateful boxes are never
-  auto-reset;
+  auto-reset; `reset` calls are exempt from required-field validation in
+  `build_call` (a stateless box must accept a data-less reset — that's the
+  fleet-wide convention, and `reset_first` relies on it);
 * serialized values (`core/serialize.py`, never raises — degrades):
   - `{kind:"array", dtype, shape, values}` — inline (≤ 65 536 elements)
-  - `{kind:"buffer", url, dtype, shape, size}` — fetch → typed buffer
+  - `{kind:"buffer", url, dtype, shape, size}` — fetch → typed buffer.
+    **Bandwidth rule:** the tensor visualizer shows buffers as *metadata
+    only* (dtype/shape/size + "download raw"); no preview/stat fetches,
+    no matter the size. Inline `{kind:"array"}` values (already in the
+    JSON) still get stats + head preview — that costs nothing. Other
+    visualizers (overlay, matrix) fetch only what they must render.
   - `{kind:"file", url, mime, size}` — images/GLB/etc.
     (sniffed: `glTF` → `model/gltf-binary`, JPEG/PNG/MP4)
   - everything else plain JSON (exotics → pickle + note).
@@ -150,8 +164,11 @@ Def-driven extras (generic, no box names in code):
 
 ## 8. Next steps (open)
 
-1. vggt GLB: camera auto-fit confirmation on a live reconstruction (no vggt
-   box in the local fleet yet).
+1. ~~vggt GLB camera auto-fit~~ — now covered: live reconstruction through
+   the panel path (typed buffers incl. 4.3 MB world_points, GLB served as
+   `model/gltf-binary`). Remaining: in-browser eyeball pass of the glb orbit
+   + `overlay` pixel check, history click-through (all code-built and
+   data-verified).
 2. In-browser human pass: `overlay` pixel check, glb orbit, history
    click-through (all code-built and data-verified, just not eyeballed).
 3. Optional: side-by-side prompts on lang_sam; `image_grid` for yologpt

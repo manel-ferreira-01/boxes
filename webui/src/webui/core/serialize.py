@@ -111,7 +111,7 @@ def _ser_tensor(v, store: ArtifactStore) -> dict:
     numel = 1
     for s in shape:
         numel *= int(s)
-    if arr is not None and isinstance(arr.dtype, type):
+    if arr is not None:
         dname = arr.dtype.name
         if dname in _NUMPY_OK:
             if numel <= MAX_INLINE_ELEMENTS:

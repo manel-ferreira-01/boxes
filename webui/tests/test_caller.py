@@ -65,18 +65,25 @@ def test_clip_defaults_and_reset(reg, store):
     assert spec.reset_first is False        # the call *is* the reset
 
 
-def test_vggt_flat_layout(reg, store):
+def test_vggt_namespaced_layout(reg, store):
     d = reg.get("vggt")
     spec = build_call(d, CallRequest(
         data={"images": [b"f1", b"f2", b"f3"]},
         parameters={"conf_threshold": 25},
     ), store)
-    # everything at the top level of config_json (legacy shape)
-    assert set(spec.config) <= {"command", "parameters"}
-    assert spec.config["parameters"] == {
-        "conf_threshold": 25, "device": "auto"}
-    assert "command" not in spec.config    # def declares no command
-    assert spec.reset_first is False       # no box_key -> nothing to reset
+    # namespaced under the box key; device only present when the user picks one
+    assert set(spec.config) == {"vggt"}
+    assert spec.config["vggt"]["command"] == "reconstruct"
+    assert spec.config["vggt"]["parameters"] == {"conf_threshold": 25}
+    assert spec.reset_first is True          # stateless box -> safe no-op reset
+
+    spec = build_call(d, CallRequest(command="reset"), store)
+    assert spec.config["vggt"]["command"] == "reset"
+    assert spec.reset_first is False         # the call *is* the reset
+
+    spec = build_call(d, CallRequest(
+        data={"images": [b"f1"]}, parameters={"device": "cpu"}), store)
+    assert spec.config["vggt"]["parameters"]["device"] == "cpu"
 
 
 def test_tapnext_session_injection(reg, store):
