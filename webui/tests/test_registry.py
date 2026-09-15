@@ -93,8 +93,6 @@ def test_moge_maps_are_visualized_per_item(reg):
     assert {"depth", "normal", "points", "intrinsics"} <= props
     maps = [r for r in d.results if r.visualizer == "field_map"]
     assert {m.params["prop"] for m in maps} == {"depth", "normal", "points"}
-    overlays = [r for r in d.results if r.visualizer == "overlay"]
-    assert overlays and any(l.prop == "mask" for l in overlays[0].layers)
     assert any(r.field == "*" for r in d.results)          # fallback renderer
 
 

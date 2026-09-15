@@ -49,14 +49,6 @@ parameters:
 
 results:
   - field: results
-    visualizer: overlay
-    base: images
-    caption: "validity mask over each input (tinted region = valid geometry)"
-    layers:
-      - prop: mask
-        layer: mask
-        opacity: 0.45
-  - field: results
     visualizer: field_map
     caption: "metric depth (m) per image"
     params:
