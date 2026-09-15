@@ -28,7 +28,7 @@ refuses non-`Process` methods with a clear error until then).
 
 | Layer | State |
 |---|---|
-| Backend | **49/49 tests green** (`python3 -m pytest tests/ -q` from `webui/`), live-verified against the running fleet (clip, lang_sam, tapnext; error paths 400/502) + an API-level vggt round trip (`fake_vggt`: namespaced call, torch tensors with full shape, GLB served as `model/gltf-binary`) |
+| Backend | **51/51 tests green** (`python3 -m pytest tests/ -q` from `webui/`), live-verified against the running fleet (clip, lang_sam, tapnext; error paths 400/502) + an API-level vggt round trip (`fake_vggt`: namespaced call, torch tensors with full shape, GLB served as `model/gltf-binary`) + a live MoGe round trip through the `points` visualizer (701k reprojected points, photo-colored, no page errors — `webui/web/.moge_points_e2e.cjs`) |
 | Frontend | `tsc --noEmit && vite build` clean; `web/dist` auto-mounted by the FastAPI app (API + `/docs` keep priority) |
 | Session fixes applied | ✅ tab-switch state leakage (console now remounts per def), ✅ video input for tapnext (`video_frames` widget), ✅ tapnext tracks `(y,x)` order corrected + per-frame visibility toggle, ✅ labeled/legend heatmaps (clip), ✅ input mosaic |
 
@@ -44,7 +44,7 @@ yologpt/opencv intentionally out of scope.
 pip install -e boxes_client && pip install -e webui
 
 # backend tests
-cd webui && python3 -m pytest tests/ -q            # 48 passed in ~2.5 s
+cd webui && python3 -m pytest tests/ -q            # 51 passed in ~4 s
 
 # frontend: typecheck + build (dist/ is served by the app)
 cd webui/web && npx tsc --noEmit && npx vite build  # warn: three.js >500 kB chunk (cosmetic)
@@ -55,7 +55,7 @@ WEBUI_DATA_DIR=$PWD/data WEBUI_PORT=8090 \
 ```
 
 Fleet seed (local docker fleet): `clip 9061 · sbert 9062 · tapnext 9063 ·
-lang_sam 9064 · vggt 9066` (see `webui/data/fleet.json`).
+lang_sam 9064 · vggt 9066 · moge 9067` (see `webui/data/fleet.json`).
 
 ## 4. Layout
 
@@ -184,7 +184,7 @@ Def-driven extras (generic, no box names in code):
    (`viz/PointCloud.tsx`) renders the back-projected cloud with three.js
    `THREE.Points` directly from the typed arrays — the hand-rolled client-
    side GLB writer was dropped (point clouds need no 3D file format).
-   Remaining: in-browser eyeball pass (playwright canvas check + screenshot).
+   Live e2e: `node webui/web/.moge_points_e2e.cjs` (canvas check + screenshot).
 3. In-browser human pass: `overlay` pixel check, glb orbit, history
    click-through (all code-built and data-verified, just not eyeballed).
 4. Optional: side-by-side prompts on lang_sam; `image_grid` for yologpt

@@ -1,7 +1,7 @@
 # boxes-webui
 
-> **Status: current** — backend (48 tests, live-verified) and the
-> SPA (`web/`: fleet page, def-driven console, all 9 visualizers) are built,
+> **Status: current** — backend (51 tests, live-verified) and the
+> SPA (`web/`: fleet page, def-driven console, all 11 visualizers) are built,
 > and a session of fixes landed: tab-state isolation, video input for
 > tapnext, per-frame track visibility, labeled heatmaps, input mosaic.
 > `tsc --noEmit && vite build` is clean; the built `web/dist` is served by
@@ -154,7 +154,7 @@ to them, and `note:` fields record where the webui's view might lag.
 
 ```bash
 cd webui
-python -m pytest tests/ -q          # 48 tests: registry, caller (pure), API e2e
+python -m pytest tests/ -q          # 51 tests: registry, caller (pure), API e2e
 ```
 
 E2E tests spin up real fake boxes over gRPC (the `fake_box_smoke.py` pattern)

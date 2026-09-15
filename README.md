@@ -40,7 +40,7 @@ Details: [boxes_client/README.md](boxes_client/README.md).
 
 ## Quick start
 
-Run the five-box fleet (host ports 9061–9065) and tour it:
+Run the six-box fleet (host ports 9061–9066) and tour it:
 
 ```bash
 cd fleet
@@ -69,6 +69,7 @@ docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_lang_segm
 | vggt | GPU | 3D reconstruction from image sequences |
 | yologpt | GPU | YOLOv11 detection & tracking |
 | opencv_box | GPU / CPU | Optical flow, feature matching, similarity checks |
+| moge_box | GPU | MoGe-3 monocular 3D geometry (depth / points / normals) — CUDA-only |
 
 **The per-box README is the authoritative source for that box's request shape**
 (config keys, fields, status, how to decode `results`):

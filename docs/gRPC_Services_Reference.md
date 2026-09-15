@@ -69,6 +69,7 @@ Use them; don't hand-roll the oneof.
 | lang_segm | `lang_sam` | aliases accepted: `lang_segm`, `aispgradio`, or the legacy flat form |
 | opencv_box | `opencv` | `Process` + `similarity_check` |
 | vggt | `vggt` | stateless; legacy `aispgradio` section / flat form accepted; response declares per-field `encoding` (torch tensors, identity GLB) |
+| moge_box | `moge` | stateless; **CUDA-only** (`cpu` rejected); outputs a per-image dict — `points (H,W,3)` / `depth (H,W)` / `normal (H,W,3)` / `intrinsics (3,3)` / `mask (H,W)` (OpenCV camera coords), encoding `zstd_pickle` |
 | yologpt | flat (`stream`, etc.) | legacy; its own RPCs |
 
 **Legacy flat form**: boxes written before the convention read
