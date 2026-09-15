@@ -32,6 +32,7 @@ shared gRPC envelope, called by `boxes_client` or by orchestration-layer boxes.
 | vggt | GPU | 3D reconstruction from image sequences |
 | yologpt | GPU | YOLOv11 detection & tracking |
 | opencv_box | GPU / CPU | Optical flow, feature matching, similarity checks |
+| moge_box | GPU | **MoGe-3: Monocular 3D geometry (depth/points/normals)** |
 
 **The per-box README is the authoritative source for that box's request shape**
 (config keys, fields, status, how to decode `results`):
