@@ -15,7 +15,7 @@ def reg():
     return load_registry(BOXES_DIR)
 
 
-EXPECTED_IDS = {"clip", "tapnext", "lang_sam", "sbert", "vggt", "moge"}
+EXPECTED_IDS = {"clip", "tapnext", "lang_sam", "sbert", "vggt", "moge", "yolo"}
 
 
 def test_out_of_scope_boxes_are_absent(reg):

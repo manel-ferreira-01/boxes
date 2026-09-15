@@ -72,6 +72,11 @@ FLEET = [
         {"images": [DOG]},
         {"moge":    {"command": "infer",   "parameters": {}}},
     ),
+    (
+        "yolo",       "localhost:9068",
+        {"images": [DOG, CAR]},
+        {"yolo":      {"command": "detect", "parameters": {"conf": 0.5}}},
+    ),
 ]
 
 

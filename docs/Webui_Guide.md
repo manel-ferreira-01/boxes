@@ -20,9 +20,10 @@ box = one YAML file, never code. The per-box README under `images/` stays the
 authoritative request-shape source; defs link to them via `docs:`.
 
 **Scope is contract-only:** every box is served through the one shared
-`Process` RPC. `yologpt` and `opencv_box` are deliberately excluded (pre-
-contract RPCs); re-adding them later = new YAML defs only (`build_call`
+`Process` RPC. `opencv_box` is deliberately excluded (pre-contract RPC);
+re-adding it later = new YAML def only (`build_call`
 refuses non-`Process` methods with a clear error until then).
+(`yologpt` migrated — see `boxes/yolo.yaml`.)
 
 ## 2. Current state (verified)
 
@@ -35,7 +36,7 @@ refuses non-`Process` methods with a clear error until then).
 Still **unverified in-browser / live**: vggt GLB orbit + tensor cards
 (the API path is covered by `fake_vggt`, but camera auto-fit still needs
 a real reconstruction), pixel-level pass of `overlay`, history click-through.
-yologpt/opencv intentionally out of scope.
+opencv intentionally out of scope (yologpt now in — `fake_yolo` e2e).
 
 ## 3. Run / build / test loop
 
@@ -187,6 +188,7 @@ Def-driven extras (generic, no box names in code):
    Live e2e: `node webui/web/.moge_points_e2e.cjs` (canvas check + screenshot).
 3. In-browser human pass: `overlay` pixel check, glb orbit, history
    click-through (all code-built and data-verified, just not eyeballed).
-4. Optional: side-by-side prompts on lang_sam; `image_grid` for yologpt
-   once it migrates to the envelope.
+4. ~~yologpt `image_grid` once it migrates to the envelope~~ — done:
+   `boxes/yolo.yaml` (annotated `image_grid` + `detections` table) plus the
+   `fake_yolo` round-trip test. Side-by-side prompts on lang_sam still open.
 5. Optional: code-split the three.js chunk (currently one ~780 kB bundle).

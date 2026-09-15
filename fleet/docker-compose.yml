@@ -88,3 +88,13 @@ services:
     ports: ["9067:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
+
+  # YOLOv11 detection & tracking — shared envelope (`detect` / `track` /
+  # `reset` commands; stateful tracker in track mode).
+  yolo:
+    <<: *gpu
+    image: ghcr.io/manel-ferreira-01/yologpt:latest
+    container_name: box-yolo
+    ports: ["9068:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped

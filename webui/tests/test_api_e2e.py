@@ -48,7 +48,7 @@ def test_defs_endpoint_shape(client):
     r = client.get("/api/defs")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["defs"]) == 6      # yologpt/opencv out of scope (pre-contract)
+    assert len(body["defs"]) == 7      # all standard boxes; opencv_box still pre-contract
     assert "image_upload" in body["vocabulary"]["widgets"]
     assert "overlay" in body["vocabulary"]["visualizers"]
 
@@ -163,6 +163,77 @@ def test_moge_full_round_trip(client, fake_moge):
     tok = depth["url"].rsplit("/", 1)[-1]
     raw = client.get(f"/api/file/{tok}").content
     assert len(raw) == depth["size"]
+
+
+def test_yolo_full_round_trip(client, fake_yolo):
+    """Full panel path for the migrated yologpt: namespaced `yolo` section,
+    command dispatch, flat JSON detections decoded via the declared `json`
+    codec, annotated JPEGs as file artifacts — and track state that persists
+    across calls until an explicit reset (never auto-reset)."""
+    fid = _seed(client, fake_yolo, "yolo lab", "yolo")
+
+    def upload(n):
+        r = client.post("/api/upload", files={"file": (
+            f"frame{n}.jpg", io.BytesIO(b"jpeg-bytes" + str(n).encode()),
+            "image/jpeg")})
+        assert r.status_code == 201, r.text
+        return r.json()["ref"]
+
+    ref = upload(0)
+
+    # -- detect ----------------------------------------------------------------
+    r = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"images": [ref]},
+        "parameters": {"conf": 0.5, "iou": 0.7},
+        "command": "detect",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["box"] == "yolo" and body["status"] == "done"
+    assert body["declared_encoding"] == {"images": "identity",
+                                         "detections": "json"}
+    dets = body["fields"]["detections"]
+    assert isinstance(dets, list) and len(dets) == 2
+    assert dets[0]["image_index"] == 0 and dets[0]["class_name"] == "person"
+    assert "track_id" not in dets[0]
+    imgs = body["fields"]["images"]
+    # single annotated JPEG -> file artifact, fetched byte-identical
+    assert imgs[0]["kind"] == "file", imgs
+    tok = imgs[0]["url"].rsplit("/", 1)[-1]
+    assert client.get(f"/api/file/{tok}").content.startswith(b"jpg:")
+
+    # -- track is stateful: ids accumulate across calls ------------------------
+    r1 = client.post("/api/call", json={
+        "fleet_id": fid, "data": {"images": [upload(1)]},
+        "parameters": {"conf": 0.5, "iou": 0.7, "tracker": "botsort.yaml"},
+        "command": "track"})
+    assert r1.status_code == 200, r1.text
+    b1 = r1.json()
+    ids1 = [d["track_id"] for d in b1["fields"]["detections"]]
+    assert ids1 == [0, 1], ids1
+
+    r2 = client.post("/api/call", json={
+        "fleet_id": fid, "data": {"images": [upload(2)]},
+        "parameters": {"conf": 0.5, "iou": 0.7},
+        "command": "track"})
+    b2 = r2.json()
+    ids2 = [d["track_id"] for d in b2["fields"]["detections"]]
+    assert ids2 == [2, 3], ids2      # continued, not reset between calls
+
+    # -- explicit reset restarts ids ----------------------------------------- 
+    r3 = client.post("/api/call", json={
+        "fleet_id": fid, "command": "reset"})
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["status"] in ("done",)          # reset is a valid call
+
+    r4 = client.post("/api/call", json={
+        "fleet_id": fid, "data": {"images": [upload(3)]},
+        "parameters": {"conf": 0.5, "iou": 0.7},
+        "command": "track"})
+    b4 = r4.json()
+    ids4 = [d["track_id"] for d in b4["fields"]["detections"]]
+    assert ids4 == [0, 1], ids4      # restarted after reset
 
 
 def test_box_error_surfaces_as_status(client, std_pb):

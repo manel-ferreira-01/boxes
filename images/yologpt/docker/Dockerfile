@@ -54,7 +54,10 @@ RUN addgroup --system ${GROUP} && \
 RUN apt update && apt install -y   libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
-    pip install grpcio grpcio-reflection  lap
+    # protobuf is installed explicitly (latest) so the freshly generated gencode
+    # (which enforces protobuf >= its own version at import) is satisfied at
+    # runtime — the ultralytics base image may ship an older protobuf.
+    pip install grpcio grpcio-reflection protobuf lap
 #    pip install grpcio==1.35.0 grpcio-reflection==1.35.0 ultralytics opencv-python
 
 # COPY .proto file to root to meet ai4eu specifications

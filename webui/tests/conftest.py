@@ -208,6 +208,66 @@ def fake_moge(std_pb):
     return FakeBox(FakeMoGe(), pb2, pb2_grpc)
 
 
+@pytest.fixture
+def fake_yolo(std_pb):
+    """Mimics the yologpt contract: images in; annotated JPEGs (identity)
+    + a flat JSON detections list (json codec) out, declared per-field
+    encoding in the response config. Stateful in track mode: track ids
+    accumulate across calls until a reset (the real box's contract)."""
+    pb2, pb2_grpc, aux = std_pb
+
+    class FakeYolo(pb2_grpc.PipelineServiceServicer):
+        def __init__(self):
+            super().__init__()
+            self._track_id = 0
+            self.seen_commands = []
+
+        def Process(self, request, context):
+            cfg = json.loads(request.config_json) if request.config_json else {}
+            sc = cfg.get("yolo")
+            if sc is None:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "error", "error": "no yolo section"}}))
+            command = sc.get("command", "detect")
+            self.seen_commands.append(command)
+            if command == "reset":
+                self._track_id = 0
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "done", "action": "reset"}}))
+            imgs = list(aux.unwrap_value(request.data.get("images")) or [])
+            if not imgs:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "empty_request"}}))
+
+            dets = []
+            for i in range(len(imgs)):
+                for k in (0, 1):
+                    det = {
+                        "image_index": i,
+                        "bbox": [4 + k, 8 + k, 60, 72],
+                        "confidence": round(0.9 - 0.1 * k, 2),
+                        "class_id": 0,
+                        "class_name": "person",
+                    }
+                    if command == "track":
+                        det["track_id"] = self._track_id
+                        self._track_id += 1
+                    dets.append(det)
+
+            env = pb2.Envelope(config_json=json.dumps({"yolo": {
+                "status": "done", "command": command,
+                "num_images": len(imgs), "num_detections": len(dets),
+                "encoding": {"images": "identity", "detections": "json"}}}))
+            # annotated "JPEGs" — the fake echoes the input bytes
+            env.data["images"].CopyFrom(
+                aux.wrap_value([b"jpg:" + str(i).encode() for i in range(len(imgs))]))
+            env.data["detections"].CopyFrom(
+                aux.wrap_value(json.dumps(dets).encode("utf-8")))
+            return env
+
+    return FakeBox(FakeYolo(), pb2, pb2_grpc)
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_boxes():
     """Stop FakeBoxes created during this test (best-effort)."""

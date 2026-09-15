@@ -1,0 +1,66 @@
+# yologpt — YOLOv11 detection & tracking (stateful in track mode).
+# Authoritative request shape: ../../images/yologpt/README.md
+id: yolo
+name: "YOLOv11 · detection & tracking"
+box_key: yolo
+docs: ../../images/yologpt/README.md
+note: >
+  `detect` is stateless (one call per image batch); `track` accumulates the
+  tracker across calls on this box — use the Reset session action (or the
+  `reset` command) to restart track ids. Detections come back as one flat,
+  ordered list (`image_index` says which input image each row belongs to).
+
+inputs:
+  - field: images
+    widget: video_frames
+    kind: bb
+    multiple: true
+    required: true
+    helper: >
+      send a video (mp4/webm/mov) — frames are extracted in your browser and
+      uploaded as images — or plain image files. In `track` mode the box
+      processes them as one sequence.
+
+command:
+  values: [detect, track, reset]
+  default: detect
+
+parameters:
+  - key: conf
+    widget: slider
+    min: 0.0
+    max: 1.0
+    step: 0.05
+    default: 0.5
+    placeholder: "confidence threshold forwarded to YOLOv11 (0..1)"
+  - key: iou
+    widget: slider
+    min: 0.0
+    max: 1.0
+    step: 0.05
+    default: 0.7
+    placeholder: "IoU threshold forwarded to YOLOv11 (0..1)"
+  - key: tracker
+    widget: select
+    values: ["bytetrack.yaml", "botsort.yaml"]
+    default: "bytetrack.yaml"
+    placeholder: "tracker backend (track mode)"
+
+session:
+  key: session_id          # not used by this box (no session_id contract key)
+  auto_generate: false
+  actions: [reset]
+  note: >
+    The tracker state lives on the box (server-global) and is keyed by
+    nothing — Reset clears it. `auto_generate` is off because `track` calls
+    must keep accumulating; `detect` ignores the tracker state entirely.
+
+results:
+  - field: images
+    visualizer: image_grid
+    caption: "annotated images (boxes drawn, one per input)"
+  - field: detections
+    visualizer: table
+    caption: "image_index · bbox [x1,y1,x2,y2] · confidence · class (track_id in track mode)"
+  - field: "*"
+    visualizer: json

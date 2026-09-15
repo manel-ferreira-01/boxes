@@ -70,7 +70,7 @@ Use them; don't hand-roll the oneof.
 | opencv_box | `opencv` | `Process` + `similarity_check` |
 | vggt | `vggt` | stateless; legacy `aispgradio` section / flat form accepted; response declares per-field `encoding` (torch tensors, identity GLB) |
 | moge_box | `moge` | stateless; **CUDA-only** (`cpu` rejected); outputs a per-image dict — `points (H,W,3)` / `depth (H,W)` / `normal (H,W,3)` / `intrinsics (3,3)` / `mask (H,W)` (OpenCV camera coords), encoding `zstd_pickle` |
-| yologpt | flat (`stream`, etc.) | legacy; its own RPCs |
+| yologpt | `yolo` | `detect` stateless; `track` stateful (tracker state is server-global, keyed by nothing); `reset` clears it; `parameters` forwarded as YOLOv11 kwargs (`conf`, `iou`, `tracker`); responses declare per-field `encoding` (`images` identity, `detections` json); legacy `YOLO` section / flat form (`stream` etc.) accepted |
 
 **Legacy flat form**: boxes written before the convention read
 `config_json` directly (`{"parameters": {...}, "stream": 2}`); `lang_segm`

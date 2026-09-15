@@ -180,18 +180,18 @@ reinterpret any 4-byte-aligned blob); boxes are expected to declare.
 | Box | In scope | Notes |
 |-----|----------|-------|
 | tapnext (`Process`) | ✅ | v1 target; `trace(box, ...)` convenience over `Box.run` |
-| vggt, moege_box, yolo, opencv_box, lang_segm, clip (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; extras like yolo `DetectSequence` / opencv `similarity_check` need the box's own proto for `method=` |
-| cotracker, textEmbedding (`Forward`) | ⏸ pending | use `Box.run` after they're migrated to the shared envelope (client needs no changes) |
+| vggt, moege_box, clip, lang_segm, **yolo** (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; `yolo` dispatches `detect`/`track`/`reset` commands and declares per-field `encoding` (`images` identity, `detections` json) |
+| opencv_box (`Process` + `similarity_check`) | ✅ partial | the shared `Process` call works; the extra `similarity_check` RPC still needs the box's own proto for `method=` |
+| cotracker (`Forward`) | ⏸ pending | use `Box.run` after it's migrated to the shared envelope (client needs no changes) |
 
 ### Method dispatch caveat
 
 `Box.run(..., method=...)` resolves to a method on the **client-stub**, which is
 built from the shared `pipeline.proto`. Today the shared proto defines only
 `Process`, so `method=` is currently useful only for `Process`. Boxes that add
-extra `PipelineService` RPCs (e.g. opencv's `similarity_check`, yolo's
-`DetectSequence`/`TrackSequence`/`AllProcessing`) will need either (a) to also
-be migrated to a *single* `Process` with a `command` field (the tapnext pattern),
-or (b) to have their own proto vendored into the client. This is the only
+extra `PipelineService` RPCs (e.g. opencv's `similarity_check`) will need either (a) to also
+be migrated to a *single* `Process` with a `command` field (the tapnext pattern —
+what `yologpt` just did), or (b) to have their own proto vendored into the client. This is the only
 remaining "per-box" knowledge in the client — everything else (field names,
 payload types, config shape) is fully generic.
 

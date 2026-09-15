@@ -32,14 +32,15 @@ so *adding a box = one YAML file*, never code.
 | lang_segm | ✅ | standard envelope |
 | textEmbedding (sbert) | ✅ | standard envelope |
 | vggt | ✅ | standard envelope (legacy flat config, supported via `flat_config`) |
-| **yologpt** | ⏸ **skipped** | predates the contract: serves `DetectSequence`/`TrackSequence`, not `Process` |
+| **yologpt** | ✅ | standard envelope: `detect` (stateless) / `track` (stateful) / `reset` |
 | **opencv_box** | ⏸ **skipped** | serves `similarity_check` as a second RPC |
 
 The skip is deliberate: the webui stays **contract-only** (one stub, `Process`,
-for every box). When those two boxes migrate to the shared envelope
+for every box). When that box migrates to the shared envelope
 (see the "Method dispatch caveat" in
-[`boxes_client/README.md`](../boxes_client/README.md)), drop their YAML
-definitions into `boxes/` — no code changes needed. Defs that request a
+[`boxes_client/README.md`](../boxes_client/README.md)), drop its YAML
+definition into `boxes/` — no code changes needed (as `yolo.yaml` now does).
+Defs that request a
 non-`Process` `method` are refused with a clear error (`build_call`).
 
 ## Quick start

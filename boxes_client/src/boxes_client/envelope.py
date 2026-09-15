@@ -4,7 +4,7 @@ Every box in the *envelope family* (tapnext, yolo, vggt, opencv_box, lang_segm,
 ...) speaks::
 
     service PipelineService {
-      rpc <Method>( Envelope ) returns ( Envelope );   # Process, DetectSequence, ...
+      rpc Process( Envelope ) returns ( Envelope );   # the shared contract RPC
     }
 
 ``build()`` turns a flat Python ``data`` dict + a ``config`` dict into an

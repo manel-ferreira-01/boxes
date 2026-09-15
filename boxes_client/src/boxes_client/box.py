@@ -166,8 +166,9 @@ class Box:
             ``Envelope.config_json``. Shape depends on the box.
         method:
             RPC name to invoke (default ``"Process"``). Boxes may expose extra
-            methods (e.g. opencv's ``similarity_check``, yolo's
-            ``DetectSequence`` / ``TrackSequence`` / ``AllProcessing``).
+            methods (e.g. opencv's ``similarity_check``); most boxes serve only
+            the shared ``Process`` and dispatch on ``command`` (the tapnext
+            pattern, which yologpt uses).
         reset_first:
             If ``True``, send a tapnext-style reset (config-only
             ``{config_key: {"command": "reset"}}``) on ``Process`` first.

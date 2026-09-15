@@ -276,28 +276,44 @@ import json
 class PipelineService(pb2_grpc.PipelineServiceServicer):
     def __init__(self):
         self.model = YOLO("yolo11n.pt")
-    
-    def DetectSequence(self, request, context):
-        if "images" not in request.data:
-            return pb2.Envelope(config_json=json.dumps({"YOLO": "empty_request"}))
-        images = unwrap_value(request.data["images"])
 
-        results_list = []
-        for img_bytes in images:
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)[..., (2, 1, 0)]
-            
-            results = self.model(img)
-            
-            # Annotate
-            annotated = results[0].plot(img=np.ascontiguousarray(results[0].orig_img))
-            _, buf = cv2.imencode('.jpg', annotated)
-            results_list.append(buf.tobytes())
-        
+    # the shared contract: ONE `Process` RPC, dispatched on `command`
+    def Process(self, request, context):
+        section = (json.loads(request.config_json or "{}") or {}).get("yolo", {})
+        command = section.get("command", "detect")
+        if command == "reset":
+            return self._status({"status": "done", "action": "reset"})
+        if "images" not in request.data:
+            return self._status({"status": "empty_request"})
+        images = unwrap_value(request.data["images"])
+        params = section.get("parameters", {}) or {}
+
+        annotated = []
+        dets = []
+        for i, img_bytes in enumerate(images):
+            img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8),
+                              cv2.IMREAD_COLOR)[..., (2, 1, 0)]
+            if command == "track":
+                results = self.model.track(source=img, persist=True, **params)
+            else:
+                results = self.model(img, **params)
+            annotated.append(cv2.imencode('.jpg',
+                results[0].plot(img=np.ascontiguousarray(results[0].orig_img)))[1].tobytes())
+            dets.append({"image_index": i, "boxes": len(results[0].boxes),
+                         **({"track_id": [int(b.id) for b in results[0].boxes]}
+                            if command == "track" else {})})
+
         return pb2.Envelope(
-            data={"images": wrap_value(results_list)},
-            config_json=json.dumps({"YOLO": "detections"})
-        )
+            data={"images": wrap_value(annotated),
+                  "detections": wrap_value(json.dumps(dets).encode())},
+            config_json=json.dumps({"yolo": {
+                "status": "done", "command": command,
+                "num_images": len(images),
+                "encoding": {"images": "identity", "detections": "json"}}}))
+
+    @staticmethod
+    def _status(section):
+        return pb2.Envelope(config_json=json.dumps({"yolo": section}))
 ```
 
 ---
