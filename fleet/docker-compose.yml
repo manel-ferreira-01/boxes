@@ -79,3 +79,12 @@ services:
     ports: ["9066:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
+
+  # MoGe-3 monocular geometry — CUDA-only box (it rejects CPU inference).
+  moge:
+    <<: *gpu
+    image: ghcr.io/manel-ferreira-01/moge_box:latest
+    container_name: box-moge
+    ports: ["9067:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped

@@ -67,6 +67,11 @@ FLEET = [
         {"images": list(VGGT_FRAMES)},
         {"vggt":    {"command": "reconstruct", "parameters": {"conf_threshold": 30}}},
     ),
+    (
+        "moge",       "localhost:9067",
+        {"images": [DOG]},
+        {"moge":    {"command": "infer",   "parameters": {}}},
+    ),
 ]
 
 

@@ -56,6 +56,7 @@ jobs:
           - { dir: opencv_box,    image: opencv_box }
           - { dir: yologpt,       image: yologpt }
           - { dir: vggt,          image: vggt }
+          - { dir: moge_box,      image: moge_box }
     steps:
       - name: Check out
         uses: actions/checkout@v4

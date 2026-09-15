@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Supervisor demo — one box-agnostic client, five boxes, same call shape.
+"""Supervisor demo — one box-agnostic client, six boxes, same call shape.
 
 The whole point to show: there is NO per-box SDK. Every box is reached with
 the identical two-argument call
@@ -172,13 +172,29 @@ def demo_opencv():
         b.close()
 
 
+def demo_moge():
+    """Monocular 3D geometry -> per-image metric depth/points/normals (CUDA-only box)."""
+    b = Box("localhost:9067")
+    try:
+        res = b.run(data={"images": [DOG]},
+                    config={"moge": {"command": "infer", "parameters": {}}})
+        print("  status          :", (res.config.get("moge", {}) or {}).get("status")
+                                             or res.config)
+        for k, item in enumerate(res.results):
+            print(f"  image {k}         : depth {getattr(item.get('depth'), 'shape', '?')}, "
+                  f"points {getattr(item.get('points'), 'shape', '?')}")
+    finally:
+        b.close()
+
+
 def main() -> int:
-    print("boxes fleet — one agnostic client, five boxes, one call shape\n")
+    print("boxes fleet — one agnostic client, six boxes, one call shape\n")
     one(1, "clip",       "localhost:9061", demo_clip)
     one(2, "textemb",    "localhost:9062", demo_textemb)
     one(3, "tapnext",    "localhost:9063", demo_tapnext)
     one(4, "lang_segm",  "localhost:9064", demo_lang_segm)
     one(5, "opencv",     "localhost:9065", demo_opencv)
+    one(6, "moge",       "localhost:9067", demo_moge)
     print("Every call above is the same shape:  Box(addr).run(data, config).")
     print("That is the entire end-user surface.")
     return 0

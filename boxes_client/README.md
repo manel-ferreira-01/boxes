@@ -180,7 +180,7 @@ reinterpret any 4-byte-aligned blob); boxes are expected to declare.
 | Box | In scope | Notes |
 |-----|----------|-------|
 | tapnext (`Process`) | ✅ | v1 target; `trace(box, ...)` convenience over `Box.run` |
-| vggt, yolo, opencv_box, lang_segm, clip (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; extras like yolo `DetectSequence` / opencv `similarity_check` need the box's own proto for `method=` |
+| vggt, moege_box, yolo, opencv_box, lang_segm, clip (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; extras like yolo `DetectSequence` / opencv `similarity_check` need the box's own proto for `method=` |
 | cotracker, textEmbedding (`Forward`) | ⏸ pending | use `Box.run` after they're migrated to the shared envelope (client needs no changes) |
 
 ### Method dispatch caveat
