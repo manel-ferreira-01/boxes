@@ -69,3 +69,13 @@ services:
     ports: ["9065:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
+
+  # Heaviest pull in the ~12 GB image (1B weights baked in at build time).
+  # Skip it with `docker compose up -d <names...>` if you don't need 3D.
+  vggt:
+    <<: *gpu
+    image: ghcr.io/manel-ferreira-01/vggt:latest
+    container_name: box-vggt
+    ports: ["9066:8061"]
+    environment: [ PORT=8061 ]
+    restart: unless-stopped

@@ -7,7 +7,7 @@ the concrete proof that the core is box-agnostic.
 
 | file              | purpose |
 |-------------------|---------|
-| `docker-compose.yml` | launches 5 real boxes (clip, textEmbedding, tapnext, lang_segm, opencv) on host ports 9061–9065, all on the shared `PipelineService` interface |
+| `docker-compose.yml` | launches 6 real boxes (clip, textEmbedding, tapnext, lang_segm, opencv, vggt) on host ports 9061–9066, all on the shared `PipelineService` interface |
 | `hello.py`        | the *minimal* end-user interface: one list of `(name, address, data, config)` specs, one `Box.run(...)` per box |
 
 ## Use
@@ -41,3 +41,4 @@ docker compose down           # stop
 | tapnext     | 9063      | `tapnext`      | point tracking (stateful; `reset` supported) |
 | lang_segm   | 9064      | `lang_sam`     | text-guided segmentation |
 | opencv      | 9065      | `opencv`       | feature matching (Process), similarity (similarity_check) |
+| vggt        | 9066      | `vggt`         | 3D reconstruction (points/depth/cameras + GLB) — heavy image, ~12 GB pull |

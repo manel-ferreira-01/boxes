@@ -30,6 +30,8 @@ from boxes_client import Box, trace  # noqa: E402
 
 # Test payloads (real assets in the repo).
 DOG, CAR = _REPO / "images/clip/test/dog.jpg", _REPO / "images/clip/test/car.jpg"
+VGGT_FRAMES = (_REPO / "images/vggt/test/images/00.jpg",
+               _REPO / "images/vggt/test/images/01.jpg")
 
 # -- THE ENTIRE end-user surface: a list of (name, address, data, config) ----
 FLEET = [
@@ -59,6 +61,11 @@ FLEET = [
         "opencv",     "localhost:9065",
         {"images": [DOG, CAR]},
         {"opencv":  {"command": "match",   "parameters": {}}},
+    ),
+    (
+        "vggt",       "localhost:9066",
+        {"images": list(VGGT_FRAMES)},
+        {"vggt":    {"command": "reconstruct", "parameters": {"conf_threshold": 30}}},
     ),
 ]
 
