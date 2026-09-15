@@ -12,7 +12,11 @@ A standard shared-envelope box, stateless and clip-shaped:
 GPU lifecycle (fleet convention): the model loads on CPU at startup, moves
 to CUDA in place on the first request (unless ``parameters.device`` says
 otherwise), and a watchdog thread moves it back to CPU after ``_IDLE_TIMEOUT``
-seconds of inactivity.
+seconds of inactivity. Weights are **not** baked into the image: the default
+checkpoint (env ``YOLO_WEIGHTS``, default ``yolov8n.pt``) is downloaded/loaded
+when the box starts, and ``parameters.weights`` switches the active
+checkpoint per call (fresh ones download on first use, into the container
+workspace).
 
 Payloads: ``detections`` is JSON (declared via the ``encoding`` contract
 key so ``boxes_client`` decodes it); ``annotated`` is a list of JPEG bytes
@@ -41,7 +45,7 @@ _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 _IDLE_TIMEOUT = 60  # seconds
 
-_DEFAULT_WEIGHTS = "yolov8n.pt"      # baked into the image at build time
+_DEFAULT_WEIGHTS = os.getenv("YOLO_WEIGHTS", "yolov8n.pt")  # runtime download
 _DEFAULTS = {
     "conf": 0.25,
     "iou": 0.70,
@@ -83,11 +87,16 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
         from ultralytics import YOLO
 
         self._torch = torch
-        # Always load to CPU first; moved to GPU lazily on request (below).
-        # The default weights are baked into the image at build time and
-        # cached under $HOME (the container workspace), so the first call
-        # never blocks on a download.
+        # Weights are NOT baked into the image (keeps the build deterministic
+        # and offline-friendly): the default checkpoint downloads at box
+        # startup into the container workspace (CWD, writable by the runner
+        # user), like clip's startup ViT download. Always loaded to CPU
+        # first; moved to GPU lazily on request (below).
+        self._models = {}
+        self._default_weights = _DEFAULT_WEIGHTS
+        self._current_weights = _DEFAULT_WEIGHTS
         self._model = YOLO(_DEFAULT_WEIGHTS)
+        self._models[_DEFAULT_WEIGHTS] = self._model
         self._device = "cpu"
         logging.info("YOLO model (%s) loaded on CPU", _DEFAULT_WEIGHTS)
 
@@ -97,6 +106,36 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
         # Background thread to monitor idle time.
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
+
+    # ------------------------------------------------------------- weights
+    def _activate_weights(self, weights):
+        """Switch the active checkpoint (under the lock).
+
+        The box stays **stateless**: ``weights`` is resolved *per call*
+        (explicit ``parameters.weights``, else the startup default) — the
+        cache only avoids re-loading the last-used checkpoints, it never
+        leaks state between calls. Inactive cached models are parked on CPU
+        (a GPU-resident model is moved down before the switch) so only the
+        *active* model can hold VRAM — the watchdog lifecycle stays 1:1
+        with the active model. Unknown checkpoints are fetched by
+        ultralytics on first use (the download lands in the container
+        workspace).
+        """
+        with self._lock:
+            if weights == self._current_weights:
+                return
+            if self._device.startswith("cuda"):
+                logging.info("Switching weights: parking %s on CPU", self._current_weights)
+                self._model.to("cpu")
+                self._torch.cuda.empty_cache()
+                self._device = "cpu"
+            if weights not in self._models:
+                logging.info("Loading checkpoint %s (first use may download)", weights)
+                from ultralytics import YOLO
+                self._models[weights] = YOLO(weights)
+            self._model = self._models[weights]
+            self._current_weights = weights
+            logging.info("Active checkpoint: %s (CPU)", weights)
 
     # ------------------------------------------------------------------ GPU
     def _watchdog_loop(self):
@@ -280,6 +319,17 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 return pipeline_pb2.Envelope(
                     config_json=json.dumps({"yolo": {"status": "empty_request"}}))
 
+            # Weights: resolved per call — explicit parameters.weights or
+            # the startup default (stateless box: no sticky state). Fresh
+            # checkpoints download on first use.
+            weights = str(parameters.get("weights") or "").strip() \
+                or self._default_weights
+            try:
+                self._activate_weights(weights)
+            except Exception as e:
+                logging.exception("failed to load weights %r", weights)
+                return _error(f"failed to load weights {weights!r}: {e}")
+
             # GPU lifecycle: CPU at startup -> lazy move on request -> idle
             # watchdog fallback (see _place_model / _watchdog_loop).
             device = self._place_model(parameters)
@@ -338,6 +388,7 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 config_json=json.dumps({
                     "yolo": {
                         "status": "done",
+                        "weights": self._current_weights,
                         "runtime": time.time() - start_time,
                         "source": source,
                         "num_frames": len(frames),

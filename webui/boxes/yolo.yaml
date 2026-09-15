@@ -32,6 +32,11 @@ command:
   default: detect
 
 parameters:
+  - key: weights
+    widget: select
+    values: ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov11n.pt", "yolov11s.pt"]
+    default: "yolov8n.pt"
+    placeholder: "fresh checkpoints download on first use (see box README for paths/URLs)"
   - key: conf
     widget: slider
     min: 0.0

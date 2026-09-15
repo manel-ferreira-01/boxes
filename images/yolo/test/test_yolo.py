@@ -11,6 +11,8 @@ Connects to a running yolo box and:
   5. optionally, if a video is available (``YOLO_TEST_VIDEO`` env var, or
      the repo's ``cozinha.mp4`` at the repo root), runs the same tour on
      the video input with frame sampling
+  6. optionally, if ``YOLO_TEST_WEIGHTS`` names a fetchable checkpoint,
+     exercises the ``parameters.weights`` switch (and the switch back)
 
 Mirrors the style of images/clip/test/test_clip.py.
 
@@ -193,6 +195,45 @@ def main():
             else:
                 print("  missing field: detections")
                 failures.append("video detections missing")
+
+    # ------------------------------------------------------------------ #
+    # Case 4: weights switch (optional — needs a fetchable checkpoint)    #
+    # ------------------------------------------------------------------ #
+    print("\n== case 4: weights switch (optional) ==")
+    test_weights = os.getenv("YOLO_TEST_WEIGHTS")
+    if not test_weights:
+        print("  SKIPPED — set YOLO_TEST_WEIGHTS (e.g. yolov8s.pt)")
+    else:
+        request = pipeline_pb2.Envelope(
+            config_json=json.dumps({
+                "yolo": {
+                    "command": "detect",
+                    "parameters": {"weights": test_weights},
+                }
+            }),
+            data={"images": aux.wrap_value([image_bytes_list[0]])},
+        )
+        response = stub.Process(request)
+        section = check_status(response)
+        if section is None:
+            failures.append("weights status")
+        else:
+            if section.get("weights") != test_weights:
+                print(f"  weights not switched: {section.get('weights')} != {test_weights}")
+                failures.append("weights switch")
+            else:
+                print(f"  active checkpoint: {section.get('weights')}")
+        # switch back to the startup default (also proves the reverse)
+        response = stub.Process(pipeline_pb2.Envelope(
+            config_json=json.dumps({"yolo": {"command": "detect", "parameters": {}}}),
+            data={"images": aux.wrap_value([image_bytes_list[0]])},
+        ))
+        section = check_status(response)
+        if section is not None and section.get("weights") == "yolov8n.pt":
+            print(f"  switched back to: {section.get('weights')}")
+        else:
+            print(f"  back-switch: {section.get('weights') if section else 'error'}")
+            failures.append("weights back-switch")
 
     channel.close()
 

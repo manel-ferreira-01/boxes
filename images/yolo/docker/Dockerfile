@@ -49,10 +49,6 @@ RUN addgroup --system ${GROUP} && \
     mkdir ${WORKSPACE} && \
     chown -R ${USER}:${GROUP} ${WORKSPACE}
 
-# $HOME -> workspace: ultralytics caches weights/settings/runs under $HOME
-# and the non-root runner must be able to write there.
-ENV HOME=${WORKSPACE}
-
 # Install requirements
 COPY requirements.txt .
 RUN apt update -y && \
@@ -80,16 +76,20 @@ COPY --chown=${USER}:${GROUP} ${SRC}/${SERVICE_NAME}_service.py ${WORKSPACE}/ser
 # Change to non-privileged user
 USER ${USER}
 
-# Bake the default checkpoint (~6 MB) so the first call never downloads
-# (ultralytics caches it under $HOME = workspace).
-RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt'); print('weights baked')"
+# No baked weights on purpose: the box downloads its checkpoint at runtime
+# (box startup / first use of parameters.weights) into the container
+# workspace (its CWD, owned by the runner user). Keeps the build offline-
+# friendly and the image small; switch the default with -e YOLO_WEIGHTS=….
 
 # Expose port 8061 according to ai4eu specifications
 EXPOSE 8061
 
 WORKDIR ${WORKSPACE}
 
-# set cache dirs for torch/huggingface (consistency with the other boxes)
+# $HOME and weight/cache dirs: ultralytics downloads checkpoints and caches
+# under $HOME and the CWD — both must be writable by the non-root runner.
+# ($HOME points at the workspace because the runner user has no home dir.)
+ENV HOME=${WORKSPACE}
 ENV TORCH_HOME=${WORKSPACE}/.cache
 ENV HF_HOME=${WORKSPACE}/.cache
 ENV HF_HUB_CACHE=${WORKSPACE}/.cache

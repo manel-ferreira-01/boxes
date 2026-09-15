@@ -44,8 +44,11 @@ yolo/
 docker build --tag sipgisr/yolo --build-arg SERVICE_NAME=yolo -f docker/Dockerfile .
 ```
 
-The default checkpoint (`yolov8n.pt`, ~6 MB) is **baked into the image at
-build time** and cached under `$HOME`, so the first call never downloads.
+**No checkpoint is baked into the image.** The default weights download at
+**box startup** (into the container workspace, ~6 MB for `yolov8n.pt`), the
+same pattern as clip's startup ViT download. Pick a different default with
+`-e YOLO_WEIGHTS=…` at run time, or any checkpoint per call with
+`parameters.weights` (a fresh one downloads into the workspace on first use).
 
 ## Run
 
@@ -70,7 +73,7 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
 
 | key               | default | meaning                                                        |
 |-------------------|---------|----------------------------------------------------------------|
-| `weights`         | —       | accepted for API consistency; the box runs the checkpoint loaded at startup (`yolov8n.pt`) |
+| `weights`         | env `YOLO_WEIGHTS` (`yolov8n.pt`) | any ultralytics checkpoint (name, local path, or URL); fresh ones download into the workspace on first use; echoed back as `weights` in the response status |
 | `conf`            | `0.25`  | confidence threshold                                            |
 | `iou`             | `0.70`  | NMS IoU threshold                                               |
 | `imgsz`           | `640`   | inference image size                                            |
@@ -89,6 +92,7 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
 {
   "yolo": {
     "status": "done",
+    "weights": "yolov8n.pt",
     "runtime": 4.21,
     "source": "images",            // or "video"
     "num_frames": 2,
@@ -155,6 +159,14 @@ res = b.run(
                                       "save_annotated": False}}},
 )
 print(res.config["yolo"])   # frames_sampled / frames_in_video / num_detections
+
+# --- switch the checkpoint for one call (downloads on first use) ----
+res = b.run(
+    data   = {"images": [pathlib.Path("dog.jpg")]},
+    config = {"yolo": {"command": "detect",
+                      "parameters": {"weights": "yolov11n.pt"}}},
+)
+print(res.config["yolo"]["weights"])   # 'yolov11n.pt'
 ```
 
 Or use the vendored protos directly:
@@ -199,3 +211,6 @@ YOLO_TEST_VIDEO=cozinha.mp4 python test/test_yolo.py
 
 The video case is **skipped** (not failed) when no video file is available:
 it checks `YOLO_TEST_VIDEO`, then the repo's `cozinha.mp4` at the repo root.
+Likewise, a `parameters.weights` switch is exercised only when
+`YOLO_TEST_WEIGHTS` names a checkpoint the test may fetch (e.g.
+`YOLO_TEST_WEIGHTS=yolov8s.pt`).

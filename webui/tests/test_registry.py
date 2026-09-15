@@ -111,7 +111,7 @@ def test_yolo_detection_def(reg):
     assert d.command.default == "detect"
     assert {f.field for f in d.inputs} == {"images", "video"}
     params = {p.key for p in d.parameters}
-    assert {"conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
+    assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
     assert viz == {"annotated": "image_grid", "detections": "table"}
 
