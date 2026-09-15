@@ -20,6 +20,7 @@ import { DataTable } from "../viz/DataTable";
 import { ImageGrid } from "../viz/ImageGrid";
 import { MatrixHeatmap } from "../viz/MatrixHeatmap";
 import { FieldMap } from "../viz/FieldMap";
+import { PointCloud } from "../viz/PointCloud";
 import { TensorView } from "../viz/TensorView";
 import { OverlayViz } from "../viz/OverlayViz";
 import { TracksPlayer } from "../viz/TracksPlayer";
@@ -716,6 +717,39 @@ function ResultBlock({
       return url
         ? <GLBView url={url} title={title} />
         : <div className="note">no glb payload in this response</div>;
+    }
+    case "points": {
+      // per-item point clouds → orbiting three.js scenes; the def names the
+      // item props.  Preferred: `depth` (+ `intrinsics`, pixel back-projection);
+      // fallback: `points` ((…, 3) positions).  `rd.base` names the input
+      // field whose uploaded images color the points — resolved from the
+      // per-call snapshot (`current.images`) so history re-renders stay
+      // aligned.  Rendered straight from typed arrays — no GLB encoding.
+      const p = (rd.params ?? {}) as Record<string, unknown>;
+      const s = (x: unknown): string | undefined => (typeof x === "string" ? x : undefined);
+      const depth = s(p["depth"]);
+      const points = s(p["points"]);
+      if (!depth && !points) {
+        return (
+          <div>
+            <div className="viz-caption">{title}</div>
+            <div className="note">points needs params.depth + params.intrinsics (reproject from depth) or params.points ((…, 3) positions)</div>
+          </div>
+        );
+      }
+      const baseImages = rd.base && current ? current.images.map(fileUrl) : [];
+      return (
+        <PointCloud
+          value={v}
+          depth={depth}
+          intrinsics={s(p["intrinsics"])}
+          projection={s(p["projection"])}
+          mask={s(p["mask"])}
+          points={points}
+          baseImages={baseImages}
+          title={title}
+        />
+      );
     }
     case "download": {
       const url = isRef(v) ? (v as { url?: string }).url : null;

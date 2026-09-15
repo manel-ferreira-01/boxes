@@ -121,40 +121,56 @@ function MapCanvas({ map }: { map: ItemMap }) {
         if (alive) setNote("shape/data mismatch");
         return;
       }
+      const isU8 = (map.data as Uint8Array).constructor === Uint8Array;
+      // (H, W, 3) is INTERLEAVED: pixel i, channel c is at i*3+c (not planar)
+      const stats: { mn: number; mx: number }[] = [];
+      for (let c = 0; c < 3; c++) {
+        let mn = Infinity, mx = -Infinity;
+        for (let i = 0; i < h * w; i++) {
+          const x = Number(map.data[i * 3 + c]);
+          if (!Number.isFinite(x)) continue;
+          if (x < mn) mn = x;
+          if (x > mx) mx = x;
+        }
+        stats.push({ mn, mx });
+      }
+      // unit-vector data (normals: each channel in [-1, 1]) uses the standard
+      // symmetric (v+1)/2 RGB encoding; anything else is min/max per channel
+      const symmetric = !isU8 && stats.every((s) =>
+        Number.isFinite(s.mn) && s.mn >= -1.0001 && s.mx <= 1.0001);
       const off = document.createElement("canvas");
       off.width = w; off.height = h;
       const octx = off.getContext("2d");
       if (!octx) return;
       const img = octx.createImageData(w, h);
-      const isU8 = (map.data as Uint8Array).constructor === Uint8Array;
-      for (let c = 0; c < 3; c++) {
-        if (isU8) {
-          for (let i = 0; i < h * w; i++) {
-            const x = Number(map.data[(w * h * c) + i]);
-            img.data[i * 4 + c] = Number.isFinite(x) ? Math.min(255, Math.max(0, x)) : 0;
+      for (let i = 0; i < h * w; i++) {
+        for (let c = 0; c < 3; c++) {
+          const x = Number(map.data[i * 3 + c]);
+          if (!Number.isFinite(x)) { img.data[i * 4 + c] = 0; continue; }
+          let t: number;
+          if (isU8) {
+            t = Math.max(0, Math.min(1, x / 255));
+          } else if (symmetric) {
+            t = (x + 1) / 2;
+          } else {
+            const { mn, mx } = stats[c];
+            t = (x - mn) / ((mx - mn) || 1);
           }
-        } else {
-          let mn = Infinity, mx = -Infinity;
-          for (let i = 0; i < h * w; i++) {
-            const x = Number(map.data[(w * h * c) + i]);
-            if (!Number.isFinite(x)) continue;
-            if (x < mn) mn = x;
-            if (x > mx) mx = x;
-          }
-          const span = mx - mn || 1;
-          for (let i = 0; i < h * w; i++) {
-            const x = Number(map.data[(w * h * c) + i]);
-            img.data[i * 4 + c] = Number.isFinite(x)
-              ? Math.round(255 * (x - mn) / span)
-              : 0;
-          }
-          notes.push(`ch${c + 1} ${mn.toPrecision(2)}…${mx.toPrecision(2)}`);
+          img.data[i * 4 + c] = Math.round(255 * Math.max(0, Math.min(1, t)));
         }
+        img.data[i * 4 + 3] = 255;             // ImageData starts fully transparent
       }
       octx.putImageData(img, 0, 0);
       draw(ref.current, off);
       drawn = true;
-      if (!isU8) notes.push("float channels min/max normalized");
+      if (isU8) {
+        // nothing extra to note
+      } else if (symmetric) {
+        notes.push("unit vectors — each channel rendered as (v+1)/2");
+      } else {
+        stats.forEach((s, c) => notes.push(`ch${c + 1} ${s.mn.toPrecision(2)}…${s.mx.toPrecision(2)}`));
+        notes.push("float channels min/max normalized");
+      }
     } else {
       notes.push("not an H×W (heat) or H×W×3 (RGB) map — metadata only");
     }

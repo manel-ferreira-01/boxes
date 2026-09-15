@@ -90,9 +90,17 @@ def test_moge_maps_are_visualized_per_item(reg):
     # string would read as truthy on the box side -> kept out of the form
     assert "fp16" not in params
     props = {r.params.get("prop") for r in d.results if r.params}
-    assert {"depth", "normal", "points", "intrinsics"} <= props
+    assert {"depth", "normal", "intrinsics"} <= props
     maps = [r for r in d.results if r.visualizer == "field_map"]
-    assert {m.params["prop"] for m in maps} == {"depth", "normal", "points"}
+    assert {m.params["prop"] for m in maps} == {"depth", "normal"}
+    cloud = [r for r in d.results if r.visualizer == "points"]
+    assert cloud
+    c = cloud[0]
+    # reprojected from the depth map (not a box-provided point array);
+    # colors come from the uploaded input image named by `base`
+    assert c.params["depth"] == "depth" and c.params["intrinsics"] == "intrinsics"
+    assert c.params["mask"] == "mask"
+    assert c.base == "images"
     assert any(r.field == "*" for r in d.results)          # fallback renderer
 
 

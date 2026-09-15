@@ -59,10 +59,13 @@ results:
     params:
       prop: normal
   - field: results
-    visualizer: field_map
-    caption: "metric point map per image (X=red, Y=green, Z=blue)"
+    visualizer: points
+    caption: "metric point cloud per image (orbit/zoom) — every pixel back-projected from the depth map, colored by the input image"
+    base: images
     params:
-      prop: points
+      depth: depth
+      intrinsics: intrinsics
+      mask: mask
   - field: results
     visualizer: matrix
     caption: "normalized camera intrinsics per image"

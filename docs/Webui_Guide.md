@@ -91,7 +91,8 @@ webui/
 * **widgets** — `image_upload · video_frames · file_upload · tags ·
   text_repeat · slider · select · number · json`
 * **visualizers** — `json (fallback) · table · image_grid · overlay
-  (box/mask/point/flow) · matrix · tensor · glb · tracks_player · download`
+  (box/mask/point/flow) · matrix · tensor · field_map · glb · points ·
+  tracks_player · download`
 * result field `"*"` = wildcard fallback, so the UI can never get stuck on a
   field a definition forgot.
 
@@ -120,6 +121,16 @@ Def-driven extras (generic, no box names in code):
   parameter is **omitted** from the wire (the box's auto/default applies).
   Don't fake an auto mode by sending a magic value — the box treats a
   missing key as *use the default*.
+* **`points` result def** — per-item point cloud, orbit/zoom, rendered
+  *directly with three.js `THREE.Points`* — a point cloud is typed arrays,
+  so there is **no GLB/glTF encoding at all** (no writer, no blobs, no
+  binary layout to debug; `glb` is only for real glTF binaries like the
+  vggt scene).  Def params pick the position source: `depth` (+ `intrinsics`,
+  `projection: normalized` (default, MoGe convention) | `pixel`) or a
+  `points` (`(…, 3)`) fallback; `mask` (same grid, keep > 0.5) filters;
+  `base: <input field>` names the uploaded images whose per-pixel RGB colors
+  the points (fallback: xyz-range colors).  Non-finite/≤ 0 depths dropped.
+  Used by moge (every depth pixel back-projected, photo-colored).
 
 ## 6. Wire rules & serialization (what the SPA must handle)
 
@@ -169,8 +180,13 @@ Def-driven extras (generic, no box names in code):
    `model/gltf-binary`). Remaining: in-browser eyeball pass of the glb orbit
    + `overlay` pixel check, history click-through (all code-built and
    data-verified).
-2. In-browser human pass: `overlay` pixel check, glb orbit, history
+2. ~~MoGe 3D point cloud~~ — done the easy way: new `points` visualizer
+   (`viz/PointCloud.tsx`) renders the back-projected cloud with three.js
+   `THREE.Points` directly from the typed arrays — the hand-rolled client-
+   side GLB writer was dropped (point clouds need no 3D file format).
+   Remaining: in-browser eyeball pass (playwright canvas check + screenshot).
+3. In-browser human pass: `overlay` pixel check, glb orbit, history
    click-through (all code-built and data-verified, just not eyeballed).
-3. Optional: side-by-side prompts on lang_sam; `image_grid` for yologpt
+4. Optional: side-by-side prompts on lang_sam; `image_grid` for yologpt
    once it migrates to the envelope.
-4. Optional: code-split the three.js chunk (currently one ~780 kB bundle).
+5. Optional: code-split the three.js chunk (currently one ~780 kB bundle).

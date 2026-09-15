@@ -44,6 +44,23 @@ export function GLBView({ url, title }: { url: string; title?: string }) {
         const center = box.getCenter(new THREE.Vector3());
         const maxDim = Math.max(size.x, size.y, size.z) || 1;
         root.position.sub(center);
+        // Generic point-cloud fix-up: point primitives arrive with a default
+        // 1px material that is unusable at scene scale — size them relative
+        // to the scene (applies to any point-cloud GLB, not just one box),
+        // and enable per-vertex color when the mesh carries it.
+        root.traverse((o) => {
+          const pts = o as THREE.Points;
+          if (!pts.isPoints || !pts.material) return;
+          const mat = pts.material as THREE.PointsMaterial;
+          // dense clouds (10⁵–10⁶ points) only read as a surface when each
+          // point is fraction-of-a-pixel; size ~ maxDim/300 works across
+          // the fleet's point clouds (vggt leftovers included)
+          if (mat.size > maxDim * 0.01 || mat.size < 1e-6) {
+            mat.size = Math.max(maxDim / 80, 1e-3);    // ≈2–3 px at the default viewing distance
+          }
+          if (pts.geometry.getAttribute("color")) mat.vertexColors = true;
+          mat.sizeAttenuation = true;
+        });
         scene.add(root);
         camera.position.set(center.x, center.y + maxDim * 0.25, center.z + maxDim * 1.6);
         camera.lookAt(0, 0, 0);

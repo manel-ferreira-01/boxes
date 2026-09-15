@@ -40,6 +40,7 @@ VISUALIZERS: frozenset[str] = frozenset({
     "field_map",      # per-item numeric map as an image (H×W heat or H×W×3 RGB)
     "tensor",         # shape/dtype/summary of a numeric array
     "glb",            # glTF binary 3D model (three.js)
+    "points",         # per-item point cloud (depth+intrinsics or (…, 3)) → THREE.Points, no 3D file format
     "tracks_player",  # frames + tracks/visibles animation
     "download",       # raw file download
 })
@@ -167,7 +168,7 @@ class ResultDef(_Def):
     field: str
     visualizer: str
     caption: Optional[str] = None
-    base: Optional[str] = None               # overlay: field holding base images
+    base: Optional[str] = None               # input field with base images (overlay base, points colors)
     layers: list[LayerDef] = Field(default_factory=list)
     inputs: dict[str, str] = Field(default_factory=dict)  # e.g. {frame: images, tracks: tracks}
     note: Optional[str] = None

@@ -130,7 +130,11 @@ docstrings). Vocabulary:
 * **widgets** — `image_upload · video_frames · file_upload · tags ·
   text_repeat · slider · select · number · json`
 * **visualizers** — `json (fallback) · table · image_grid · overlay
-  (box/mask/point/flow layers) · matrix · tensor · glb · tracks_player · download`
+  (box/mask/point/flow layers) · matrix · tensor · field_map · glb · points
+  · tracks_player · download`
+  (`points` renders point clouds straight from typed arrays with three.js
+  `THREE.Points` — no GLB encoding; `glb` is for real glTF binaries like
+  the vggt scene)
 * **result field `"*"`** — wildcard fallback, so the UI can never get stuck
   on a field a definition forgot (the "client always returns something" rule).
 
