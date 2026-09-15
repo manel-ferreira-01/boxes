@@ -45,9 +45,9 @@ jobs:
         #   image   = GHCR image name (lowercase) — this is what `docker pull`
         #             and fleet/docker-compose.yml use.
         #
-        # vggt is EXCLUDED: its vendored model package `images/vggt/src/vggt/`
-        # is missing from the repo (see images/vggt/src/vggt_service.py), so
-        # the image cannot build. Restore that package to re-add it here.
+        # vggt pulls its codebase (facebookresearch/vggt) and the 1B weights
+        # (facebook/VGGT-1B, ~5 GB) at build time — the heaviest build in the
+        # fleet, but self-contained (nothing missing from the repo anymore).
         box:
           - { dir: clip,          image: clip }
           - { dir: tapnext_tracker, image: tapnext_tracker }
@@ -55,6 +55,7 @@ jobs:
           - { dir: textEmbedding, image: textembedding }
           - { dir: opencv_box,    image: opencv_box }
           - { dir: yologpt,       image: yologpt }
+          - { dir: vggt,          image: vggt }
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -131,7 +132,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           echo "Pin fleet/docker-compose.yml to these digests for a fully reproducible fleet:"
-          for image in clip tapnext_tracker lang_segm textembedding opencv_box yologpt; do
+          for image in clip tapnext_tracker lang_segm textembedding opencv_box yologpt vggt; do
             d=$(docker buildx imagetools inspect "ghcr.io/${OWNER}/${image}:${VER}" 2>/dev/null \
                 | awk '/^Digest:/{print $2}')
             echo "  $image -> ghcr.io/${OWNER}/${image}@${d:-<push failed — check that job>}"

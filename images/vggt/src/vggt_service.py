@@ -1,59 +1,105 @@
 import concurrent.futures as futures
-import grpc
-import grpc_reflection.v1alpha.reflection as grpc_reflection
+import io
+import json
 import logging
 import os
+import sys
+import threading
 import time
-    
-import io
+
 import numpy as np
-
 import torch
-
-# add vggt to the path
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)) + '/vggt')
-print(sys.path)
-
 from PIL import Image
-import pickle
 
-from importlib.machinery import SourceFileLoader
-import sys
+# add the vendored vggt codebase + the vendored protos to the path
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vggt"))
 sys.path.append("./protos")
-import pipeline_pb2 as vggt_pb2
-import pipeline_pb2_grpc as vggt_pb2_grpc
+
+import grpc
+import grpc_reflection.v1alpha.reflection as grpc_reflection
+
+import pipeline_pb2
+import pipeline_pb2_grpc
 from aux import wrap_value, unwrap_value
 
-
 from vggt.models.vggt import VGGT
-from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.visual_util import predictions_to_glb
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-
-import os
-from torchvision import transforms as TF
 from utils.preprocess import preprocess_images_batch
-import traceback
+
 
 _PORT_ENV_VAR = 'PORT'
 _PORT_DEFAULT = 8061
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
-IDLE_TIMEOUT = 60  # seconds
+_IDLE_TIMEOUT = 60  # seconds
 
-def tensor_to_numpy_bytes(t: torch.Tensor) -> bytes:
+# Accept the box key first; "aispgradio" is the pre-convention name, kept so
+# old callers keep working (same alias pattern as lang_segm).
+_BOX_KEYS = ("vggt", "aispgradio")
+
+#: Declared payload encoding (boxes_client contract): the tensors travel as
+#: torch.save()-format bytes, the GLB is a raw binary blob (identity — the
+#: explicit declaration is what keeps the client's legacy guess-chain from
+#: mis-decoding the glTF binary as a float buffer).
+ENCODING = {
+    "world_points": "torch",
+    "world_points_conf": "torch",
+    "depth": "torch",
+    "depth_conf": "torch",
+    "extrinsic": "torch",
+    "intrinsic": "torch",
+    "images": "torch",
+    "glb_file": "identity",
+}
+
+# Model weights (baked into the image at build time; downloaded on startup if absent)
+_WEIGHTS_FILENAME = "vggt-1b.pt"          # runtime name (WORKDIR)
+_WEIGHTS_REPO = "facebook/VGGT-1B"
+_WEIGHTS_HF_FILE = "model.pt"             # filename inside the HF repo
+
+
+def _tensor_bytes(t: torch.Tensor) -> bytes:
     buf = io.BytesIO()
-    np.save(buf, t.detach().cpu().numpy(), allow_pickle=False)
+    torch.save(t.detach().cpu().contiguous(), buf, pickle_protocol=4)
     return buf.getvalue()
 
-import threading
-import json
+
+def _cfg_envelope(status: str, **extra) -> "pipeline_pb2.Envelope":
+    return pipeline_pb2.Envelope(
+        config_json=json.dumps({"vggt": {"status": status, **extra}}))
 
 
-class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
+def _weights_path() -> str:
+    """Return a path to the VGGT 1B checkpoint, downloading it on first use."""
+    if os.path.isfile(_WEIGHTS_FILENAME):
+        return _WEIGHTS_FILENAME
+    from huggingface_hub import hf_hub_download
+    logging.info("VGGT weights not found locally — downloading %s/%s ...",
+                 _WEIGHTS_REPO, _WEIGHTS_HF_FILE)
+    return hf_hub_download(repo_id=_WEIGHTS_REPO,
+                           filename=_WEIGHTS_HF_FILE,
+                           local_dir=".")
+
+
+def _clear_position_caches(model):
+    """VGGT's ``PositionGetter`` caches position grids keyed by ``(h, w)`` on
+    the *first caller's device* (upstream VGGT bug: the key omits the
+    device). The getter is a plain attribute (``aggregator.position_getter``
+    — not an ``nn.Module``), so ``model.to(device)`` never moves those
+    tensors. Clear the cache after every device move, or the next forward
+    cats cuda/cpu tensors."""
+    for module in model.modules():
+        candidates = [module] + list(vars(module).values())
+        for obj in candidates:
+            cache = getattr(obj, "position_cache", None)
+            if isinstance(cache, dict):
+                cache.clear()
+
+
+class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
     def __init__(self):
-        # Always load to CPU first
+        # Always load to CPU first; moved to GPU lazily on request (see below).
         self._model = None
         self._device = "cpu"
         self._last_request_time = time.time()
@@ -61,7 +107,6 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
         self._load_event = threading.Event()
         self._load_error = None
-        self._pending_device = None
 
         # Background model loader
         self._loader_thread = threading.Thread(target=self._load_model_async, daemon=True)
@@ -71,13 +116,17 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
+    # ------------------------------------------------------------------
+    # Model lifecycle
+    # ------------------------------------------------------------------
 
     def _load_model_async(self):
-        """Background thread that loads VGGT model."""
+        """Background thread that loads the VGGT model on CPU."""
         try:
             logging.info("Loading VGGT model asynchronously...")
             mdl = VGGT()
-            mdl.load_state_dict(torch.load("./vggt-1b.pt", map_location="cpu"))
+            mdl.load_state_dict(
+                torch.load(_weights_path(), map_location="cpu"))
             with self._lock:
                 self._model = mdl
                 self._device = "cpu"
@@ -94,42 +143,46 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
             with self._lock:
                 idle_time = time.time() - self._last_request_time
                 # Move back to CPU only if currently on GPU
-                if idle_time > IDLE_TIMEOUT and self._device.startswith("cuda"):
+                if idle_time > _IDLE_TIMEOUT and self._device.startswith("cuda"):
                     logging.info("Idle timeout reached: moving model back to CPU")
                     self._model.to("cpu")
                     torch.cuda.empty_cache()
                     self._device = "cpu"
 
-    def set_device(self, target: str):
+    def _resolve_device(self, requested):
+        """Decide where the model runs for this request.
+
+        * explicit ``parameters.device`` (``"cpu"`` / ``"cuda[*]"``) wins;
+        * otherwise: CUDA when visible, CPU otherwise (fleet convention).
+        The move is in-place (``.to(device)`` on the torch modules).
+        """
         with self._lock:
             self._last_request_time = time.time()
-            target = target.lower()
-            if target.startswith("cuda") and not torch.cuda.is_available():
-                logging.warning("CUDA requested but not available. Staying on CPU.")
-                return self._device
-
-            if target == self._device:
-                return self._device
-
-            try:
-                logging.info(f"Reinitializing VGGT model on {target}")
-                
-                new_model = VGGT().to(target)
-                new_model.load_state_dict(
-                    self._model.state_dict(), strict=False
-                )
-                
-                del self._model
-                torch.cuda.empty_cache()
-                self._model = new_model
-                self._device = target
-            except Exception as e:
-                logging.exception(f"Failed to move model to {target}: {e}")
+            if requested:
+                target = str(requested).lower()
+                if target.startswith("cuda") and not torch.cuda.is_available():
+                    logging.warning("CUDA requested but not available. Staying on CPU.")
+                    return self._device
+                if target == "cpu" or target.startswith("cuda"):
+                    if target != self._device:
+                        logging.info("Request received: moving model to %s", target)
+                        self._model.to(target)
+                        _clear_position_caches(self._model)
+                        self._device = target
+            elif self._device == "cpu" and torch.cuda.is_available():
+                logging.info("Request received: moving model to GPU")
+                self._model.to("cuda")
+                _clear_position_caches(self._model)
+                self._device = "cuda"
             return self._device
 
+    # ------------------------------------------------------------------
+    # gRPC entry point
+    # ------------------------------------------------------------------
 
     def Process(self, request, context):
         start = time.time()
+
         # Wait for model load to complete (blocking)
         while not self._load_event.is_set():
             logging.info("VGGT model still loading... waiting before processing.")
@@ -137,144 +190,141 @@ class PipelineService(vggt_pb2_grpc.PipelineServiceServicer):
 
         if self._load_error:
             logging.error(f"VGGT model failed to load: {self._load_error}")
-            return vggt_pb2.Envelope(
-                config_json=json.dumps({
-                    "VGGT": {"status": "error", "error": self._load_error}
-                })
-            )
-        
-        results = {}
+            return _cfg_envelope("error", error=self._load_error,
+                                 runtime=time.time() - start)
+
         try:
             if not request.config_json:
-                return vggt_pb2.Envelope()
+                return _cfg_envelope("error",
+                                     error="No config JSON")
+
             try:
                 config = json.loads(request.config_json)
             except json.JSONDecodeError:
-                logging.error("config_json is not valid JSON")
+                return _cfg_envelope("error", error="config_json is not valid JSON")
 
-            params = config.get("parameters", {}) or {}
-            requested_device = params.get("device", None)
+            # Box section: namespaced under the box key (legacy flat / aispgradio
+            # accepted for old callers, same as lang_segm).
+            section = {}
+            for key in _BOX_KEYS:
+                if isinstance(config, dict) and isinstance(config.get(key), dict):
+                    section = config[key]
+                    break
+            command = section.get("command")
 
-            if requested_device:
-                _ = self.set_device(requested_device)
+            # Stateless box: "reset" is accepted as a no-op (client convenience).
+            if command == "reset":
+                return _cfg_envelope("done", action="reset",
+                                     runtime=time.time() - start)
 
-            if not request.data.get("images", []):
-                return vggt_pb2.Envelope(config_json=request.config_json)
-            else:
-                # --- Extract image(s) ---º
-                img_list = unwrap_value(request.data.get("images", []))
-                if not img_list:
-                    logging.error("No images provided in request.data['images']")
-                    return vggt_pb2.Envelope()
-            
-            # --- Run inference ---
-            results, glb_file = run_codigo(request, self._model, self._device)
+            params = section.get("parameters") or {}
+            if not isinstance(params, dict) and isinstance(config, dict):
+                params = config.get("parameters") or {}   # legacy flat form
 
-            import zlib
-            response = vggt_pb2.Envelope(
-                config_json=json.dumps({'VGGT': {'status': 'done',
-                                                'runtime': time.time() - start}}),
+            if "images" not in request.data or not unwrap_value(request.data["images"]):
+                return _cfg_envelope("empty_request")
 
-                data={"world_points": wrap_value(tensor_to_numpy_bytes(results["world_points"])),
-                    "world_points_conf": wrap_value(tensor_to_numpy_bytes(results["world_points_conf"])),
-                    "depth": wrap_value(tensor_to_numpy_bytes(results["depth"])),
-                    "depth_conf": wrap_value(tensor_to_numpy_bytes(results["depth_conf"])),
-                    "extrinsic": wrap_value(tensor_to_numpy_bytes(results["extrinsic"])),
-                    "intrinsic": wrap_value(tensor_to_numpy_bytes(results["intrinsic"])),
-                    "images": wrap_value(tensor_to_numpy_bytes(torch.tensor(results["images"]))),
-                    "glb_file" : wrap_value(glb_file)
-                    } # already bytes
+            image_list = unwrap_value(request.data["images"])
+
+            device = self._resolve_device(params.get("device"))
+            conf_thres = params.get("conf_threshold", 30)
+            logging.info("device=%s conf_threshold=%s images=%d",
+                         device, conf_thres, len(image_list))
+
+            predictions, glb_bytes = self._run(image_list, device, conf_thres)
+
+            response = pipeline_pb2.Envelope(
+                config_json=json.dumps({
+                    "vggt": {
+                        "status": "done",
+                        "runtime": time.time() - start,
+                        "num_images": len(image_list),
+                        "device": self._device,
+                        "encoding": ENCODING,
+                    }
+                }),
+                data={
+                    "world_points": wrap_value(_tensor_bytes(predictions["world_points"])),
+                    "world_points_conf": wrap_value(_tensor_bytes(predictions["world_points_conf"])),
+                    "depth": wrap_value(_tensor_bytes(predictions["depth"])),
+                    "depth_conf": wrap_value(_tensor_bytes(predictions["depth_conf"])),
+                    "extrinsic": wrap_value(_tensor_bytes(predictions["extrinsic"])),
+                    "intrinsic": wrap_value(_tensor_bytes(predictions["intrinsic"])),
+                    "images": wrap_value(_tensor_bytes(predictions["images"])),
+                    "glb_file": wrap_value(glb_bytes),
+                },
             )
 
-            if 'glb_file' in response.data:
-                glb_size = len(unwrap_value(response.data['glb_file']))
-                logging.info(f"Size of glb_file: {glb_size / (1024 * 1024):.2f} MB")
-                logging.info(f"Size of glb_file (compressed): {len(zlib.compress(unwrap_value(response.data['glb_file'])))/(1024*1024):.2f} MB")
-
-            # size of the whole message
-            total_size = sum(len(unwrap_value(v)) for v in response.data.values())
-            logging.info(f"Total response size: {total_size / (1024 * 1024):.2f} MB")
+            glb_mb = len(glb_bytes) / (1024 * 1024)
+            total_mb = sum(len(unwrap_value(v)) for v in response.data.values()) / (1024 * 1024)
+            logging.info("Response size: glb=%.2f MB total=%.2f MB", glb_mb, total_mb)
 
             return response
-        
+
         except Exception as e:
-            tb = traceback.format_exc()
-            logging.error("[VGGT] Unhandled exception:\n%s", tb)
-            return vggt_pb2.Envelope()
-                           
+            logging.exception("[VGGT] Unhandled exception")
+            return _cfg_envelope("error", error=f"{type(e).__name__}: {e}",
+                                 runtime=time.time() - start)
 
+    # ------------------------------------------------------------------
+    # Inference
+    # ------------------------------------------------------------------
 
-def run_codigo(request, model, device):
+    def _run(self, image_list, device, conf_thres):
+        received_images = []
+        for image_bytes in image_list:
+            img = Image.open(io.BytesIO(bytes(image_bytes))).convert("RGB")
+            received_images.append(np.array(img))
 
-    received_images = []
-    for image_bytes in unwrap_value(request.data["images"]):
-        image_stream = io.BytesIO(image_bytes)
-        img = Image.open(image_stream).convert("RGB")
-        img_np = np.array(img)
-        received_images.append(img_np)
+        # all frames must share height/width (VGGT contract)
+        shapes = {img.shape for img in received_images}
+        if len(shapes) != 1:
+            raise ValueError(
+                f"All images must have the same shape, but got: {sorted(shapes)}")
 
-    #check if images are all the same shape otherwise raise error
-    shapes = [img.shape for img in received_images]
-    if len(set(shapes)) != 1:
-        raise ValueError(f"All images must have the same shape, but got shapes: {shapes}")
-    
-    images = torch.tensor(np.stack(received_images)).permute(0,3,1,2).to(device)
-    images = preprocess_images_batch(images.float() / 255)
+        images = torch.tensor(np.stack(received_images)).permute(0, 3, 1, 2).to(device)
+        images = preprocess_images_batch(images.float() / 255)
 
-    query_points = None
+        if device.startswith("cuda"):
+            dtype = (torch.bfloat16
+                     if torch.cuda.get_device_capability(device)[0] >= 8
+                     else torch.float16)
+            with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
+                predictions = self._model(images, query_points=None)
+        else:
+            with torch.no_grad():
+                predictions = self._model(images, query_points=None)
 
-    use_cuda = device.startswith("cuda")
-    if use_cuda:
-        dtype = torch.bfloat16 if torch.cuda.get_device_capability(device)[0] >= 8 else torch.float16
-        with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
-            predictions = model(images, query_points=query_points)
-    else:
-        with torch.no_grad():
-            predictions = model(images, query_points=query_points)
+        extrinsic, intrinsic = pose_encoding_to_extri_intri(
+            predictions["pose_enc"], images.shape[-2:])
+        predictions["extrinsic"] = extrinsic.squeeze()
+        predictions["intrinsic"] = intrinsic.squeeze()
 
-    extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
-    predictions["extrinsic"] = extrinsic.squeeze()
-    predictions["intrinsic"] = intrinsic.squeeze()
+        # Drop bulky intermediates; move everything to CPU for serialization
+        predictions.pop("pose_enc_list", None)
+        predictions = {k: v.cpu() for k, v in predictions.items()}
+        predictions["images"] = images.cpu()   # CHW float tensor (what VGGT saw)
 
-    # Drop unnecessary intermediate outputs
-    predictions.pop("pose_enc_list", None)
-    predictions = {k: v.cpu() for k, v in predictions.items()}
-    #add images to output
-    predictions["images"] = images.cpu().numpy()
+        # predictions_to_glb works on numpy arrays (it calls .astype etc.) —
+        # convert just for that call; the response keeps torch tensors.
+        glb_pred = {k: (v.detach().cpu().numpy() if torch.is_tensor(v) else v)
+                    for k, v in predictions.items()}
+        glb_scene = predictions_to_glb(glb_pred, conf_thres=conf_thres,
+                                      target_dir="/tmp")
+        glb_bytes = glb_scene.export(file_type="glb")
 
-    #extract conf threshold from request
-    json_config = json.loads(request.config_json)
-    params = json_config.get("aispgradio", {}).get("parameters", {}) or {}
-    conf_thres = params.get("conf_threshold", 30)
-    mask_sky = params.get("mask_sky", False)
-    logging.info(f"Using confidence threshold: {conf_thres}")
-    logging.info(f"Using mask sky: {mask_sky}")
+        return predictions, glb_bytes
 
-    # create a file like object to export the glb file
-    glb_scene = predictions_to_glb(predictions, 
-                                   conf_thres=conf_thres,
-                                    #mask_sky=mask_sky,
-                                    target_dir="/tmp")
-    
-    b = glb_scene.export(file_type="glb")
-
-    # Move everything to CPU for serialization
-    return predictions, b
 
 # ----------------------------------------
 # Server setup and running
 # ----------------------------------------
 
 def get_port():
-    """
-    Parses the port where the server should listen
-    Exists the program if the environment variable
-    is not an int or the value is not positive
+    """Parse the port where the server should listen.
 
-    Returns:
-        The port where the server should listen or
-        None if an error occurred
-
+    Returns the port, or None (and logs the problem) if the environment
+    variable is missing/invalid.
     """
     try:
         server_port = int(os.getenv(_PORT_ENV_VAR, _PORT_DEFAULT))
@@ -286,15 +336,10 @@ def get_port():
         logging.exception('Unable to parse port')
         return None
 
+
 def run_server(server):
-    """Run the given server on the port defined
-    by the environment variables or the default port
-    if it is not defined
-
-    Args:
-        server: server to run
-
-    """
+    """Run the given server on the port defined by the environment variables
+    or the default port if it is not defined."""
     port = get_port()
     if not port:
         return
@@ -308,23 +353,26 @@ def run_server(server):
             time.sleep(_ONE_DAY_IN_SECONDS)
     except KeyboardInterrupt:
         server.stop(0)
-        
+
 
 if __name__ == '__main__':
     logging.basicConfig(
         format='[ %(levelname)s ] %(asctime)s (%(module)s) %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.INFO)
-    #Create Server and add service
-    server = grpc.server(futures.ThreadPoolExecutor(),
-                         options= [('grpc.max_send_message_length', -1), 
-                                   ('grpc.max_receive_message_length', -1)])
-    vggt_pb2_grpc.add_PipelineServiceServicer_to_server(
-        PipelineService(), server)
 
-    # Add reflection
+    server = grpc.server(
+        futures.ThreadPoolExecutor(),
+        options=[
+            ('grpc.max_send_message_length', -1),
+            ('grpc.max_receive_message_length', -1),
+        ]
+    )
+
+    pipeline_pb2_grpc.add_PipelineServiceServicer_to_server(PipelineService(), server)
+
     service_names = (
-        vggt_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
+        pipeline_pb2.DESCRIPTOR.services_by_name['PipelineService'].full_name,
         grpc_reflection.SERVICE_NAME
     )
     grpc_reflection.enable_server_reflection(service_names, server)

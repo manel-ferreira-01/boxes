@@ -93,8 +93,10 @@ inherent to a process that initialized CUDA. It is not a leak and it does not
 grow with traffic.
 
 `tapnext_tracker` and `opencv_box` load straight to CUDA at startup when
-available (they keep state or run per-frame); `vggt` rebuilds on demand. All
-variants respect an explicit `parameters.device` in the request when provided.
+available (they keep state or run per-frame); `vggt` uses the same lazy
+in-place moves (its 1B weights come from the baked image or an on-startup
+download — see its README). All variants respect an explicit
+`parameters.device` in the request when provided.
 
 ## Calling boxes
 

@@ -1,11 +1,9 @@
 # Define workdir folder for all stages
 # Must be renewed in the beggining of each stage
 ARG WORKSPACE=/workspace
-# This argument will be used to identify the
-# proto file as well as the python file with the server
-# The proto file should have the name ${SERVICE_NAME}.proto
-# The python file should have the name ${SERVICE_NAME}_service.py
-ARG SERVICE_NAME=simplebox
+# This argument names the server entry point:
+# the file copied in is ${SERVICE_NAME}_service.py -> service.py
+ARG SERVICE_NAME=vggt
 
 
 # --------------------------------------
@@ -29,6 +27,38 @@ WORKDIR ${WORKSPACE}
 
 # Compile proto file and remove it
 RUN python -m grpc_tools.protoc -I. --python_out=.  --grpc_python_out=. pipeline.proto
+
+
+# --------------------------------------
+# Weights stage — download the VGGT 1B checkpoint once at build time
+# (the service also downloads on startup if the file is absent)
+# --------------------------------------
+
+FROM python:slim-bookworm AS weights
+ARG VGGT_WEIGHTS_REPO=facebook/VGGT-1B
+ARG VGGT_WEIGHTS_FILENAME=model.pt
+ENV VGGT_WEIGHTS_REPO=${VGGT_WEIGHTS_REPO} VGGT_WEIGHTS_FILENAME=${VGGT_WEIGHTS_FILENAME}
+
+RUN pip install --no-cache-dir huggingface_hub && \
+    python -c "import shutil; from huggingface_hub import hf_hub_download; \
+    p = hf_hub_download(repo_id='$VGGT_WEIGHTS_REPO', filename='$VGGT_WEIGHTS_FILENAME', local_dir='/weights'); \
+    shutil.move(p, '/weights/vggt-1b.pt')"   # runtime name used by the service
+
+
+# --------------------------------------
+# Vendor stage — fetch the VGGT codebase (not committed to this repo)
+# --------------------------------------
+
+FROM python:slim-bookworm AS vendor
+ARG VGGT_CODE_REPO=https://github.com/facebookresearch/vggt
+ARG VGGT_CODE_REV=main
+
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    (git clone --depth 1 --branch ${VGGT_CODE_REV} ${VGGT_CODE_REPO} /vggt 2>/dev/null \
+     || git clone --depth 1 ${VGGT_CODE_REPO} /vggt) && \
+    rm -rf /vggt/.git
 
 
 # -----------------------------
@@ -86,18 +116,16 @@ WORKDIR ${WORKSPACE}
 # Specific steps for vggt service
 # -----------------------------
 
-COPY --chown=${USER}:${GROUP} ${SRC}/vggt ${WORKSPACE}/vggt
+# VGGT codebase (from the vendor stage above)
+COPY --from=vendor --chown=${USER}:${GROUP} /vggt ${WORKSPACE}/vggt
 RUN pip install -r ${WORKSPACE}/vggt/requirements.txt
+
+# Baked-in VGGT weights (from the weights stage above)
+COPY --from=weights --chown=${USER}:${GROUP} /weights/vggt-1b.pt ${WORKSPACE}/vggt-1b.pt
 
 # set $TORCH_HOME for torchhub cache
 ENV TORCH_HOME=${WORKSPACE}/.cache
 ENV HF_HOME=${WORKSPACE}/.cache
 ENV HF_HUB_CACHE=${WORKSPACE}/.cache
-
-#copy vggt-1b.pt to workspace
-COPY --chown=${USER}:${GROUP} docker/vggt-1b.pt ${WORKSPACE}/vggt-1b.pt
-
-#print the torchhub cache path
-RUN echo "Torch hub cache path: $TORCH_HOME"
 
 CMD ["python3", "service.py"]

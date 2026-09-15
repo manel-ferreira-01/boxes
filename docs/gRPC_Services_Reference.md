@@ -68,7 +68,7 @@ Use them; don't hand-roll the oneof.
 | textEmbedding | `sbert` | stateless |
 | lang_segm | `lang_sam` | aliases accepted: `lang_segm`, `aispgradio`, or the legacy flat form |
 | opencv_box | `opencv` | `Process` + `similarity_check` |
-| vggt | flat (`parameters` at top level) | legacy; response uses `VGGT` section |
+| vggt | `vggt` | stateless; legacy `aispgradio` section / flat form accepted; response declares per-field `encoding` (torch tensors, identity GLB) |
 | yologpt | flat (`stream`, etc.) | legacy; its own RPCs |
 
 **Legacy flat form**: boxes written before the convention read
@@ -91,7 +91,7 @@ box in this repo converges on:
 
 ### Heavy results: `zstd(compress) + pickle`
 
-For list-shaped results that can't fit in JSON (LangSAM masks, vggt outputs),
+For list-shaped results that can't fit in JSON (LangSAM masks),
 the convention is:
 
 ```python
@@ -148,9 +148,10 @@ Standard boxes answer `Process` with a namespaced status:
 - **`empty_request`** — the `images` field was missing/empty.
 - **`error`** — missing config, no prompt, or inference failure; the human
   readable reason is in `"error"`.
-- **Config-only echo** — some boxes (opencv, vggt) forward
+- **Config-only echo** — some boxes (opencv) forward
   config-only envelopes without images and echo them back unchanged; callers
-  treat an empty `data` as "no work, continue".
+  treat an empty `data` as "no work, continue". Standard stateless boxes
+  (clip, sbert, lang_sam, vggt) answer those with `status: empty_request` instead.
 
 ## Devices & GPU behaviour (as deployed)
 
