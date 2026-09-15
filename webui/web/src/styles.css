@@ -213,6 +213,9 @@ table.data td { font-family: var(--mono); }
 .player .step { color: var(--fg-dim); font-size: 12px; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--fg-dim); margin-top: 6px; }
 .legend .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
+.mask-legend { font-size: 13px; color: var(--fg); }
+.mask-legend .row { display: inline-flex; align-items: center; background: var(--bg3); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; white-space: nowrap; }
+.mask-legend .row .sw { margin-right: 6px; }
 
 /* matrix */
 .matrixbox { overflow: auto; max-width: 720px; }

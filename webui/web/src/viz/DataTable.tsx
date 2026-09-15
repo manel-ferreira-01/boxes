@@ -82,6 +82,10 @@ function toModel(value: unknown): { cols: string[]; rows: unknown[][] } | null {
 }
 
 function Fallback({ value }: { value: unknown }) {
+  if (value === undefined || value === null) {
+    // field absent from this response (e.g. a reset/reply without results)
+    return <div className="note">no value in this response</div>;
+  }
   if (isRef(value)) {
     return (
       <div>

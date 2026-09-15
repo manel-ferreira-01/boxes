@@ -1,6 +1,6 @@
 /** App shell: hash router (#/fleet, #/box/<defId>) + topbar nav.
  *  Nothing here knows a box's request shape — the defs drive the pages. */
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api, ApiError } from "./api";
 import type { BoxDef } from "./api";
@@ -23,6 +23,47 @@ export function routeOf(hash: string): { page: "fleet" } | { page: "box"; id: st
   const m = path.match(/^\/box\/([^/]+)/);
   if (m) return { page: "box", id: decodeURIComponent(m[1]) };
   return { page: "fleet" };
+}
+
+/** Catch render-time crashes so a bad response can never unmount the whole
+ *  app into a blank page: the user sees the error and can reload instead. */
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { err: Error | null; detail: string | null }
+> {
+  state: { err: Error | null; detail: string | null } = { err: null, detail: null };
+
+  static getDerivedStateFromError(_err: Error): { err: Error } {
+    return { err: _err };
+  }
+
+  componentDidCatch(_err: unknown, info: { componentStack?: string | null }): void {
+    this.setState({ detail: (info?.componentStack || "").slice(0, 2000) });
+  }
+
+  render(): ReactNode {
+    if (this.state.err) {
+      return (
+        <div className="panel">
+          <h3>render crash — response detail hit a bug</h3>
+          <p className="sub">
+            The box response rendered, but the result panel threw {this.state.err.name}:{" "}
+            {this.state.err.message}. The rest of the console is still alive;
+            the offending detail is shown raw below.
+          </p>
+          <ErrorBox detail={{ error: String(this.state.err) }} />
+          <details style={{ marginTop: 8 }}>
+            <summary style={{ cursor: "pointer", color: "var(--fg-dim)", fontSize: 12.5 }}>component stack</summary>
+            <pre style={{ overflow: "auto" }}>{this.state.detail || "(none)"}</pre>
+          </details>
+          <div className="btnrow" style={{ marginTop: 10 }}>
+            <button className="btn" onClick={() => window.location.reload()}>reload webui</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function App() {
@@ -72,7 +113,9 @@ export default function App() {
         )}
       </header>
       <main>
-        <div className="page">{content}</div>
+        <div className="page">
+          <ErrorBoundary key={`${hash}-${String(err)}`}>{content}</ErrorBoundary>
+        </div>
       </main>
     </div>
   );

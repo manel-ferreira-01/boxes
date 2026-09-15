@@ -53,8 +53,12 @@ results:
         layer: box
       - prop: masks
         layer: mask
-        opacity: 0.5
-    note: "per-image item dict (verified against the running box)"
+        opacity: 0.7
+    note: >
+      per-image item dict (verified against the running box).
+      Masks are colored per region (box i pairs with mask i); the
+      legend under the canvas lists the label and score of each
+      colored region (text_labels / scores keys).
   - field: results
     visualizer: table
     caption: "decoded per-item dictionaries"

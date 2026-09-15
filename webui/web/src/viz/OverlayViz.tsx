@@ -1,15 +1,32 @@
 /** Overlay visualizer: base image + typed layers (box / mask / point / flow)
- *  per decoded item.  Coordinates are in the original image's pixel space. */
+ *  per decoded item.  Coordinates are in the original image's pixel space.
+ *
+ *  Mask layers are explicit by construction:
+ *   - each mask i gets its own cycle color (PALETTE[i]), and box layer
+ *     rectangles are colored the same way, so box i ↔ mask i pair up;
+ *   - the fill is strong (layer.opacity, default 0.7) plus a light outline
+ *     drawn along the mask boundary so regions read clearly on any photo;
+ *   - a numbered legend under the canvas says what each colored region
+ *     represents: label (text_labels / labels, …) and score (scores /
+ *     mask_scores, …) from the item, if the box reported them. */
 import { useEffect, useRef, useState } from "react";
 import type { LayerDef } from "../api";
 import { fetchTyped, inlineValues, isRef, PALETTE } from "../resolvers";
 
 interface OverlayItemProps {
-  index: number;
   item: Record<string, unknown>;
   baseUrl: string | null;
   layers: LayerDef[];
 }
+
+interface LegendEntry {
+  color: string;
+  id: number;
+  label: string;
+  score: number | null;
+}
+
+type MaskData = { w: number; h: number; data: number[] };
 
 export function OverlayViz({
   items, baseImages, layers,
@@ -25,7 +42,6 @@ export function OverlayViz({
         <div key={i} className="overlay-per">
           {(items.length > 1 || i > 0) && <div className="cap viz-caption">item {i}</div>}
           <OverlayItem
-            index={i}
             item={(it && typeof it === "object") ? it as Record<string, unknown> : { value: it }}
             baseUrl={baseImages[i] ?? null}
             layers={layers}
@@ -36,11 +52,11 @@ export function OverlayViz({
   );
 }
 
-function OverlayItem({ index, item, baseUrl, layers }: OverlayItemProps) {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
+function OverlayItem({ item, baseUrl, layers }: OverlayItemProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [legend, setLegend] = useState<LegendEntry[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -68,25 +84,34 @@ function OverlayItem({ index, item, baseUrl, layers }: OverlayItemProps) {
         }
         if (!alive) return;
 
-        // 2) layers
-        for (let li = 0; li < layers.length; li++) {
-          const layer = layers[li];
+        // 2) layers (mask layers push into the shared legend)
+        const legend: LegendEntry[] = [];
+        for (const layer of layers) {
           const raw = item[layer.prop];
           if (raw === undefined || raw === null) continue;
-          const color = PALETTE[(index + li) % PALETTE.length];
-          await drawLayer(ctx, layer, raw, W, H, color);
+          await drawLayer(ctx, layer, item, raw, W, H, legend);
         }
-        if (alive) { setReady(true); setError(null); }
+        if (alive) { setLegend(legend); setReady(true); setError(null); }
       } catch (e) {
         if (alive) setError(String((e as Error).message || e));
       }
     })();
     return () => { alive = false; };
-  }, [item, baseUrl, layers, index]);
+  }, [item, baseUrl, layers]);
 
   return (
-    <div className="overlaybox" ref={wrapRef}>
+    <div className="overlaybox">
       <canvas ref={canvasRef} style={{ visibility: ready ? "visible" : "hidden" }} />
+      {legend.length > 0 && (
+        <div className="legend mask-legend">
+          {legend.map((e, k) => (
+            <span key={k} className="row" title={`${e.label} ${e.score != null ? e.score.toFixed(2) : ""}`}>
+              <i className="sw" style={{ background: e.color }} />
+              {` ${e.id + 1} · ${e.label}${e.score != null ? ` (${e.score.toFixed(2)})` : ""}`}
+            </span>
+          ))}
+        </div>
+      )}
       {error && <div className="note" style={{ color: "var(--err)" }}>overlay failed: {error}</div>}
     </div>
   );
@@ -104,50 +129,55 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
 async function drawLayer(
   ctx: CanvasRenderingContext2D,
   layer: LayerDef,
+  item: Record<string, unknown>,
   raw: unknown,
   W: number,
   H: number,
-  color: string,
+  legend: LegendEntry[],
 ): Promise<void> {
   const opacity = layer.opacity ?? 1;
   switch (layer.layer) {
     case "box": {
+      // one color per rectangle, matching the mask color cycle below, so
+      // box i visually belongs to mask i
       const rects = await toRects(raw);
       ctx.save();
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = color;
-      for (const r of rects) {
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        ctx.strokeStyle = PALETTE[i % PALETTE.length];
         ctx.strokeRect(r[0], r[1], r[2] - r[0], r[3] - r[1]);
       }
       ctx.restore();
       return;
     }
     case "mask": {
-      const mask = await toMaskData(raw);
-      if (!mask) return;
-      const off = document.createElement("canvas");
-      off.width = mask.w; off.height = mask.h;
-      const octx = off.getContext("2d");
-      if (!octx) return;
-      const data = octx.createImageData(mask.w, mask.h);
-      const [r, g, b] = hexRgb(color);
-      for (let i = 0; i < mask.data.length; i++) {
-        const v = mask.data[i];
-        data.data[i * 4 + 0] = r;
-        data.data[i * 4 + 1] = g;
-        data.data[i * 4 + 2] = b;
-        data.data[i * 4 + 3] = Math.round(Math.min(1, Math.max(0, v)) * 255 * opacity * 0.85);
+      const masks = await toMaskList(raw);
+      if (!masks.length) return;
+      const labels = labelsPerMask(item);
+      const scores = await scoresPerMask(item);
+      for (let mi = 0; mi < masks.length; mi++) {
+        const color = PALETTE[mi % PALETTE.length];
+        const [r, g, b] = hexRgb(color);
+        drawMaskFill(ctx, masks[mi], W, H, r, g, b, opacity);
+        drawMaskOutline(ctx, masks[mi], W, H, r, g, b);
+        const s = scores ? scores[mi] : undefined;
+        legend.push({
+          color,
+          id: mi,
+          label: labels && labels[mi] ? labels[mi] : `mask ${mi + 1}`,
+          score: typeof s === "number" && Number.isFinite(s) ? s : null,
+        });
       }
-      octx.putImageData(data, 0, 0);
-      ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
       return;
     }
     case "point":
     case "flow": {
       const pts = await toPoints(raw);
+      const [r, g, b] = hexRgb(PALETTE[0]);
       ctx.save();
-      ctx.fillStyle = color;
-      ctx.strokeStyle = color;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
       for (const p of pts) {
         if (layer.layer === "flow" && p.length >= 4) {
           ctx.beginPath();
@@ -167,6 +197,149 @@ async function drawLayer(
       return;
   }
 }
+
+/** Opaque-ish region fill, full resolution. */
+function drawMaskFill(
+  ctx: CanvasRenderingContext2D,
+  mask: MaskData,
+  W: number,
+  H: number,
+  r: number,
+  g: number,
+  b: number,
+  opacity: number,
+): void {
+  const off = document.createElement("canvas");
+  off.width = mask.w; off.height = mask.h;
+  const octx = off.getContext("2d");
+  if (!octx) return;
+  const data = octx.createImageData(mask.w, mask.h);
+  for (let i = 0; i < mask.data.length; i++) {
+    const v = Math.min(1, Math.max(0, mask.data[i] || 0));
+    data.data[i * 4 + 0] = r;
+    data.data[i * 4 + 1] = g;
+    data.data[i * 4 + 2] = b;
+    data.data[i * 4 + 3] = Math.round(v * 255 * Math.min(1, opacity));
+  }
+  octx.putImageData(data, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
+}
+
+/** Light boundary outline along the mask edge (cheap: computed at reduced
+ *  resolution, then scaled up — the edge is 1 px-ish either way). */
+function drawMaskOutline(
+  ctx: CanvasRenderingContext2D,
+  mask: MaskData,
+  W: number,
+  H: number,
+  r: number,
+  g: number,
+  b: number,
+): void {
+  const maxSide = 320;
+  const scale = Math.min(1, maxSide / Math.max(mask.w, mask.h));
+  const w = Math.max(4, Math.round(mask.w * scale));
+  const h = Math.max(4, Math.round(mask.h * scale));
+  const on = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x >= mask.w || y >= mask.h) return false;
+    return (mask.data[y * mask.w + x] || 0) >= 0.5;
+  };
+  // lightened version of the mask color: readable over both dark and
+  // bright photo regions the fill sits on
+  const lr = Math.min(255, Math.round(r + (255 - r) * 0.75));
+  const lg = Math.min(255, Math.round(g + (255 - g) * 0.75));
+  const lb = Math.min(255, Math.round(b + (255 - b) * 0.75));
+
+  const off = document.createElement("canvas");
+  off.width = w; off.height = h;
+  const octx = off.getContext("2d");
+  if (!octx) return;
+  const data = octx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const sx = Math.min(mask.w - 1, Math.round(x / scale));
+      const sy = Math.min(mask.h - 1, Math.round(y / scale));
+      if (!on(sx, sy)) continue;
+      if (on(sx - 1, sy) && on(sx + 1, sy) && on(sx, sy - 1) && on(sx, sy + 1)) continue;
+      data.data[(y * w + x) * 4 + 0] = lr;
+      data.data[(y * w + x) * 4 + 1] = lg;
+      data.data[(y * w + x) * 4 + 2] = lb;
+      data.data[(y * w + x) * 4 + 3] = 235;
+    }
+  }
+  octx.putImageData(data, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(off, 0, 0, W, H);
+}
+
+// ---------------------------------------------------------------------------
+// per-mask labels / scores (item-level lists, parallel to the mask list)
+// ---------------------------------------------------------------------------
+
+const LABEL_KEYS = ["text_labels", "labels", "text_prompt", "prompts", "text"];
+const SCORE_KEYS = ["scores", "mask_scores", "label_scores"];
+
+function labelsPerMask(item: Record<string, unknown>): string[] | null {
+  for (const key of LABEL_KEYS) {
+    const s = strList(item[key]);
+    if (s && s.length) return s;
+  }
+  return null;
+}
+
+async function scoresPerMask(item: Record<string, unknown>): Promise<number[] | null> {
+  for (const key of SCORE_KEYS) {
+    const v = item[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v === "number" && Number.isFinite(v)) return [v];
+    if (Array.isArray(v)) {
+      // element may be a nested per-phrase score list -> take the max
+      const out = v.map((el) => {
+        if (typeof el === "number" && Number.isFinite(el)) return el;
+        if (Array.isArray(el)) {
+          const nums = (el as unknown[]).filter((x) => typeof x === "number" && Number.isFinite(x)) as number[];
+          return nums.length ? Math.max(...nums) : NaN;
+        }
+        return NaN;
+      });
+      if (out.length) return out;
+      continue;
+    }
+    if (isRef(v)) {
+      // serialized tensor: inline values, or fetch the buffer artifact
+      const t = await fetchTyped(v as never);
+      if (t && t.data.length) {
+        const out: number[] = [];
+        for (let i = 0; i < t.data.length; i++) out.push(Number(t.data[i]));
+        return out;
+      }
+    }
+  }
+  return null;
+}
+
+function strList(v: unknown): string[] | null {
+  const list = Array.isArray(v) ? v : (typeof v === "string" ? [v] : null);
+  if (!list) return null;
+  const out: string[] = [];
+  for (const el of list) {
+    if (typeof el === "string" && el.trim()) { out.push(el.trim()); continue; }
+    if (typeof el === "number") { out.push(String(el)); continue; }
+    if (Array.isArray(el)) {
+      const parts = (el as unknown[])
+        .filter((x) => typeof x === "string" && String(x).trim())
+        .map((x) => String(x).trim());
+      if (parts.length) { out.push(parts.join(", ")); continue; }
+    }
+    out.push(""); // opaque entry (ref / object) — legend falls back to "mask i"
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// geometry helpers
+// ---------------------------------------------------------------------------
 
 async function toRects(raw: unknown): Promise<number[][]> {
   // shape (n,4) or ((1,n,4)) flat, or list of [x1,y1,x2,y2]
@@ -200,50 +373,79 @@ async function toRects(raw: unknown): Promise<number[][]> {
   return [];
 }
 
-async function toMaskData(raw: unknown): Promise<{ w: number; h: number; data: number[] } | null> {
+/** Masks from a raw field value: a flat inline matrix (single mask), a list
+ *  of matrices/refs (one entry per mask), or one ref with shape
+ *  (n,h,w) / (h,w) / (n,). */
+async function toMaskList(raw: unknown): Promise<MaskData[]> {
   if (Array.isArray(raw)) {
-    // inline: [h][w] number matrix, possibly wrapped in a single-element list
-    let arr: unknown = raw;
-    while (Array.isArray(arr) && (arr as unknown[]).length === 1 && Array.isArray((arr as unknown[])[0])) {
-      arr = (arr as unknown[])[0];
+    // single inline mask matrix?  [h][w] numbers
+    const isMatrix = raw.length > 0 &&
+      raw.every((x) => Array.isArray(x) && (x as unknown[]).length > 0 &&
+        (x as unknown[]).every((y) => typeof y === "number"));
+    if (isMatrix) {
+      const m = inlineMatrixToMask(raw);
+      return m ? [m] : [];
     }
-    if (
-      Array.isArray(arr) &&
-      (arr as unknown[]).length > 0 &&
-      (arr as unknown[]).every((r) => Array.isArray(r) && (r as unknown[]).length > 0 &&
-        (r as unknown[]).every((x) => typeof x === "number"))
-    ) {
-      const rows = arr as number[][];
-      const w = Math.max(...rows.map((r) => r.length));
-      const h = rows.length;
-      const data: number[] = [];
-      for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) data.push(Number(rows[i][j]) || 0);
-      return { w, h, data };
-    }
-    return null;
-  }
-  if (isRef(raw)) {
-    const shape = ((raw as { shape?: number[] }).shape ?? []) as number[];
-    const t = await fetchTyped(raw as never);
-    if (!t) return null;
-    const n = t.data.length;
-    if (shape.length >= 2) {
-      const w = shape[shape.length - 1];
-      const h = shape[shape.length - 2];
-      if (n >= w * h) {
-        const data: number[] = [];
-        for (let i = 0; i < w * h; i++) data.push(Number(t.data[i]));
-        return { w, h, data };
+    const out: MaskData[] = [];
+    for (const el of raw) {
+      if (Array.isArray(el)) {
+        const m = inlineMatrixToMask(el);
+        if (m) out.push(m);
+      } else if (isRef(el)) {
+        out.push(...await refToMasks(el));
       }
     }
-    // 1-D fallback: square-ish guess
-    const w = Math.round(Math.sqrt(n));
-    const h = Math.ceil(n / w);
-    const data: number[] = [];
-    for (let i = 0; i < n; i++) data.push(Number(t.data[i]));
-    return { w, h, data };
+    return out;
   }
-  return null;
+  if (isRef(raw)) {
+    return refToMasks(raw);
+  }
+  return [];
+}
+
+function inlineMatrixToMask(raw: unknown): MaskData | null {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  if (!raw.every((r) => Array.isArray(r) && (r as unknown[]).length > 0 &&
+    (r as unknown[]).every((x) => typeof x === "number"))) return null;
+  const rows = raw as number[][];
+  const w = Math.max(...rows.map((r) => r.length));
+  const h = rows.length;
+  const data: number[] = [];
+  for (let i = 0; i < h; i++) for (let j = 0; j < (rows[i]?.length ?? 0); j++) data.push(Number(rows[i][j]) || 0);
+  return { w, h, data };
+}
+
+async function refToMasks(raw: unknown): Promise<MaskData[]> {
+  const t = await fetchTyped(raw as never);
+  if (!t || t.data.length === 0) {
+    const inline = inlineValues(raw as never);
+    if (!inline || inline.length === 0) return [];
+    const n = inline.length;
+    const w = Math.max(1, Math.round(Math.sqrt(n)));
+    const h = Math.ceil(n / w);
+    return [{ w, h, data: inline.slice(0, w * h) }];
+  }
+  const flat: number[] = [];
+  const push = (count: number) => { for (let i = 0; i < count; i++) flat.push(Number(t.data[i])); };
+  const shape = t.shape;
+  if (shape.length >= 3) {
+    const n = Math.max(1, shape[0]), h = Math.max(1, shape[1]), w = Math.max(1, shape[2]);
+    const total = Math.min(t.data.length, n * h * w);
+    push(total);
+    const out: MaskData[] = [];
+    for (let i = 0; i < n; i++) out.push({ w, h, data: flat.slice(i * w * h, Math.min((i + 1) * w * h, flat.length)) });
+    return out;
+  }
+  if (shape.length === 2) {
+    const h = Math.max(1, shape[0]), w = Math.max(1, shape[1]);
+    push(Math.min(t.data.length, h * w));
+    return [{ w, h, data: flat }];
+  }
+  const n = t.data.length;
+  const w = Math.max(1, Math.round(Math.sqrt(n)));
+  const h = Math.ceil(n / w);
+  push(n);
+  return [{ w, h, data: flat.slice(0, w * h) }];
 }
 
 async function toPoints(raw: unknown): Promise<number[][]> {
