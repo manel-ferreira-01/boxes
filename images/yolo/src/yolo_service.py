@@ -227,7 +227,10 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
     def _decode_video(self, video_bytes, frame_step, max_frames):
         """Server-side decode: (sampled BGR frames, their original indices,
-        total frame count)."""
+        total frame count).  The total comes from the container metadata
+        (``CAP_PROP_FRAME_COUNT``) when the codec provides it, else falls
+        back to the number of frames actually decoded before the
+        ``max_frames`` cap."""
         suffix = _sniff_video_ext(video_bytes)
         tmp_path = None
         try:
@@ -241,18 +244,23 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 raise ValueError(f"cv2.VideoCapture could not open the video "
                                  f"(sniffed container {suffix!r} — unsupported codec?)")
 
+            try:
+                meta_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            except (TypeError, ValueError):
+                meta_total = 0
+
             frames, indices = [], []
-            total = 0
+            decoded = 0
             while len(frames) < max_frames:
                 ok, frame = cap.read()
                 if not ok:
                     break
-                if total % frame_step == 0:
+                if decoded % frame_step == 0:
                     frames.append(frame)
-                    indices.append(total)
-                total += 1
+                    indices.append(decoded)
+                decoded += 1
             cap.release()
-            return frames, indices, total
+            return frames, indices, (meta_total if meta_total > 0 else decoded)
         finally:
             if tmp_path:
                 try:

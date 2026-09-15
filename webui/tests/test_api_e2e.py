@@ -165,6 +165,83 @@ def test_moge_full_round_trip(client, fake_moge):
     assert len(raw) == depth["size"]
 
 
+def test_yolo_full_round_trip(client, fake_yolo):
+    """The full panel path for the detection box: declared ``json``/``identity``
+    encodings, per-frame detection records inline (the ``table`` visualizer
+    reads them), annotated frames as image/jpeg file artifacts (the
+    ``image_grid`` visualizer fetches them), the single-``b`` video input,
+    and the box's in-band validation error for both-fields."""
+    fid = _seed(client, fake_yolo, "yolo lab", "yolo")
+
+    up = [client.post("/api/upload",
+                      files={"file": (f"f{n}.jpg", io.BytesIO(b"jpeg-n"),
+                                      "image/jpeg")}) for n in (0, 1)]
+    assert all(u.status_code == 201 for u in up), [u.text for u in up]
+    refs = [u.json()["ref"] for u in up]
+
+    # --- images ------------------------------------------------------
+    r = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"images": refs},
+        "parameters": {"conf": 0.25, "weights": "yolov8n.pt"},
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["box"] == "yolo" and body["status"] == "done"
+    assert body["declared_encoding"] == {"detections": "json",
+                                         "annotated": "identity"}
+    assert body["config_extra"]["weights"] == "yolov8n.pt"
+    assert body["config_extra"]["source"] == "images"
+
+    # detections: JSON-decoded, inline, one record per frame
+    dets = body["fields"]["detections"]
+    assert isinstance(dets, list) and len(dets) == 2
+    assert set(dets[0]) == {"frame_index", "width", "height", "boxes",
+                            "class_ids", "labels", "scores"}
+    assert dets[0]["boxes"] == [[10.5, 20.25, 30.0, 40.0]]
+    assert dets[0]["labels"] == ["dog"] and dets[0]["class_ids"] == [16]
+    assert dets[1]["frame_index"] == 1
+
+    # annotated: one image/jpeg file artifact per frame, fetchable
+    ann = body["fields"]["annotated"]
+    assert len(ann) == 2
+    assert all(a["kind"] == "file" and a["mime"] == "image/jpeg" for a in ann)
+    tok = ann[0]["url"].rsplit("/", 1)[-1]
+    g = client.get(f"/api/file/{tok}")
+    assert g.status_code == 200
+    assert g.content.startswith(b"\xff\xd8\xff") and g.content[:31].startswith(
+        b"\xff\xd8\xff\xe0fake-annotated-0")
+
+    # --- video (single b field -> server-side decode contract) --------
+    upv = client.post("/api/upload",
+                      files={"file": ("clip.mp4", io.BytesIO(b"\x00\x00\x00\x14ftypisom"),
+                                      "video/mp4")})
+    assert upv.status_code == 201, upv.text
+    rv = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"video": upv.json()["ref"]},
+        "parameters": {"frame_step": 30, "max_frames": 4},
+    })
+    assert rv.status_code == 200, rv.text
+    bv = rv.json()
+    assert bv["status"] == "done"
+    assert bv["config_extra"]["source"] == "video"
+    assert bv["config_extra"]["frames_in_video"] == 211
+    v_dets = bv["fields"]["detections"]
+    assert [d["frame_index"] for d in v_dets] == [0, 30, 60, 90]   # frame_step spacing
+    assert len(bv["fields"]["annotated"]) == 4
+
+    # --- box validation: both fields -> in-band error, no HTTP 500 ---
+    rb = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"images": [refs[0]], "video": upv.json()["ref"]},
+    })
+    assert rb.status_code == 200, rb.text
+    bb = rb.json()
+    assert bb["status"] == "error" and "not both" in bb["error"]
+
+
 def test_box_error_surfaces_as_status(client, std_pb):
     """A box answering status=error is a *successful* call that reports an
     error in-band — the client never raises; the UI must not either."""

@@ -208,6 +208,87 @@ def fake_moge(std_pb):
     return FakeBox(FakeMoGe(), pb2, pb2_grpc)
 
 
+@pytest.fixture
+def fake_yolo(std_pb):
+    """Mimics the yolo box contract: ``images`` (list) and/or a single
+    ``video`` (bytes) in; per-frame detection records as a JSON blob
+    (declared ``json``) + JPEG-annotated frames as a bytes list (declared
+    ``identity``) out.  Mirrors the real service's request validation
+    (reset / both / neither) and the ``frame_step`` video sampling."""
+    pb2, pb2_grpc, aux = std_pb
+
+    ENCODING = {"detections": "json", "annotated": "identity"}
+    JPEG_MAGIC = b"\xff\xd8\xff\xe0"
+
+    def jpeg(n: int) -> bytes:
+        return JPEG_MAGIC + f"fake-annotated-{n}".encode() + b"\x00" * 64
+
+    def record(frame_index: int, n: int) -> dict:
+        return {
+            "frame_index": frame_index,
+            "width": 64 + n * 8,
+            "height": 48,
+            "boxes": [[10.5, 20.25, 30.0, 40.0]],
+            "class_ids": [16],
+            "labels": ["dog"],
+            "scores": [0.91 - 0.01 * (n % 10)],
+        }
+
+    class FakeYolo(pb2_grpc.PipelineServiceServicer):
+        def Process(self, request, context):
+            cfg = json.loads(request.config_json) if request.config_json else {}
+            sc = cfg.get("yolo", {})
+            params = sc.get("parameters", {}) or {}
+            if sc.get("command") == "reset":
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "done", "action": "reset"}}))
+            imgs = aux.unwrap_value(request.data.get("images")) if "images" in request.data else None
+            video = aux.unwrap_value(request.data.get("video")) if "video" in request.data else None
+            if imgs and video:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "error",
+                              "error": "send either data.images or data.video, not both"}}))
+            if not imgs and not video:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "empty_request"}}))
+
+            imgsz = int(params.get("imgsz") or 640)  # accepted for shape fidelity
+            if video:
+                # emulate server-side decode + frame_step sampling (no real
+                # frames available here; we just report a believable shape
+                # with the real box's frame_index spacing).
+                step = max(1, int(params.get("frame_step") or 1))
+                cap = max(1, int(params.get("max_frames") or 1024))
+                detections, annotated, frame_index, n = [], [], 0, 0
+                while n < cap:
+                    detections.append(record(frame_index, n))
+                    annotated.append(jpeg(n))
+                    frame_index += step
+                    n += 1
+                status = {"source": "video", "frames_in_video": 211,
+                          "frame_step": step}
+            else:
+                list_imgs = list(imgs)
+                detections, annotated = [], []
+                for n in range(len(list_imgs)):
+                    detections.append(record(n, n))
+                    annotated.append(jpeg(n))
+                status = {"source": "images"}
+
+            env = pb2.Envelope(config_json=json.dumps({
+                "yolo": {"status": "done", "weights": "yolov8n.pt",
+                         "runtime": 0.42, "num_frames": len(detections),
+                         "frames_sampled": len(detections),
+                         "num_detections": len(detections),
+                         "encoding": ENCODING, **status}}))
+            env.data["detections"].CopyFrom(
+                aux.wrap_value(json.dumps(detections).encode("utf-8")))
+            env.data["annotated"].CopyFrom(aux.wrap_value(annotated))
+            return env
+
+    return FakeBox(FakeYolo(), pb2, pb2_grpc)
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_boxes():
     """Stop FakeBoxes created during this test (best-effort)."""

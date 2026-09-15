@@ -98,7 +98,7 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
     "num_frames": 2,
     "frames_sampled": 2,
     "num_detections": 3,
-    "frames_in_video": 211,        // video only
+    "frames_in_video": 211,        // video only: total (container metadata; fallback: decoded)
     "frame_step": 30,              // video only
     "encoding": { "detections": "json", "annotated": "identity" }
   }
