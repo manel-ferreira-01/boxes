@@ -92,12 +92,19 @@ function MatrixSingle({
   rowLabels?: string[];
   colLabels?: string[];
 }) {
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+  // non-finite cells exist in real payloads (e.g. NaN depth regions) —
+  // stats run over finite values only, and heatColor renders NaN as "invalid"
+  let min = Infinity, max = -Infinity;
+  for (const x of data) {
+    if (Number.isFinite(x)) { if (x < min) min = x; if (x > max) max = x; }
+  }
+  const has = Number.isFinite(min);
   return (
     <div>
       <div style={{ marginBottom: 6, color: "var(--fg-dim)", fontSize: 12 }}>
-        {rows} × {cols} · min {min.toFixed(4)} · max {max.toFixed(4)}
+        {rows} × {cols}{has
+          ? ` · min ${min.toFixed(4)} · max ${max.toFixed(4)}`
+          : " · no finite values"}
       </div>
       <div className="matrixbox">
         <HeatCanvas
@@ -121,7 +128,11 @@ const VIRIDIS: [number, number, number][] = [
   "#440154", "#46327e", "#365c8d", "#277f8e", "#1fa187", "#4ac16d", "#a0da39", "#fde725",
 ].map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)] as [number, number, number]);
 
+/** invalid/absent cell color (dark canvas background — "no value") */
+export const HEAT_INVALID = "rgb(16, 21, 28)";
+
 export function heatColor(t: number): string {
+  if (!Number.isFinite(t)) return HEAT_INVALID;
   const x = Math.max(0, Math.min(1, t)) * (VIRIDIS.length - 1);
   const i = Math.min(VIRIDIS.length - 2, Math.floor(x));
   const f = x - i;

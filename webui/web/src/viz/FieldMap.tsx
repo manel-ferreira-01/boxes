@@ -83,11 +83,16 @@ function MapCanvas({ map }: { map: ItemMap }) {
         if (alive) setNote("shape/data mismatch");
         return;
       }
-      let mn = Infinity, mx = -Infinity;
+      let mn = Infinity, mx = -Infinity, invalid = 0;
       for (let i = 0; i < h * w; i++) {
         const x = Number(map.data[i]);
+        if (!Number.isFinite(x)) { invalid++; continue; }   // NaN/Inf regions exist in real maps
         if (x < mn) mn = x;
         if (x > mx) mx = x;
+      }
+      if (!Number.isFinite(mn)) {
+        if (alive) setNote(notes.concat("no finite values — nothing to render").join(" · "));
+        return;
       }
       const span = mx - mn || 1;
       const off = document.createElement("canvas");
@@ -96,7 +101,8 @@ function MapCanvas({ map }: { map: ItemMap }) {
       if (!octx) return;
       const img = octx.createImageData(w, h);
       for (let i = 0; i < h * w; i++) {
-        const [r, g, b] = heatRgb((Number(map.data[i]) - mn) / span);
+        const x = Number(map.data[i]);
+        const [r, g, b] = Number.isFinite(x) ? heatRgb((x - mn) / span) : heatRgb(NaN);
         img.data[i * 4 + 0] = r;
         img.data[i * 4 + 1] = g;
         img.data[i * 4 + 2] = b;
@@ -105,7 +111,10 @@ function MapCanvas({ map }: { map: ItemMap }) {
       octx.putImageData(img, 0, 0);
       draw(ref.current, off);
       drawn = true;
-      if (alive) setNote(notes.concat(`${w} × ${h} · min ${mn.toPrecision(3)} · max ${mx.toPrecision(3)}`).join(" · "));
+      if (alive) setNote(notes.concat(
+        `${w} × ${h} · min ${mn.toPrecision(3)} · max ${mx.toPrecision(3)}`,
+        invalid ? `${invalid} invalid (dark) cells` : "",
+      ).filter(Boolean).join(" · "));
     } else if (mode === "rgb") {
       const [h, w] = [map.shape[0], map.shape[1]];
       if (!h || !w || map.data.length < h * w * 3) {
@@ -120,17 +129,24 @@ function MapCanvas({ map }: { map: ItemMap }) {
       const isU8 = (map.data as Uint8Array).constructor === Uint8Array;
       for (let c = 0; c < 3; c++) {
         if (isU8) {
-          for (let i = 0; i < h * w; i++) img.data[i * 4 + c] = Number(map.data[(w * h * c) + i]);
+          for (let i = 0; i < h * w; i++) {
+            const x = Number(map.data[(w * h * c) + i]);
+            img.data[i * 4 + c] = Number.isFinite(x) ? Math.min(255, Math.max(0, x)) : 0;
+          }
         } else {
           let mn = Infinity, mx = -Infinity;
           for (let i = 0; i < h * w; i++) {
             const x = Number(map.data[(w * h * c) + i]);
+            if (!Number.isFinite(x)) continue;
             if (x < mn) mn = x;
             if (x > mx) mx = x;
           }
           const span = mx - mn || 1;
           for (let i = 0; i < h * w; i++) {
-            img.data[i * 4 + c] = Math.round(255 * (Number(map.data[(w * h * c) + i]) - mn) / span);
+            const x = Number(map.data[(w * h * c) + i]);
+            img.data[i * 4 + c] = Number.isFinite(x)
+              ? Math.round(255 * (x - mn) / span)
+              : 0;
           }
           notes.push(`ch${c + 1} ${mn.toPrecision(2)}…${mx.toPrecision(2)}`);
         }

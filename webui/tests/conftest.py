@@ -185,6 +185,7 @@ def fake_moge(std_pb):
             for n in range(len(imgs)):
                 rng = np.random.default_rng(7 + n)
                 depth = (2.0 + 4.0 * rng.random((H, W))).astype(np.float32)
+                depth[:16, :16] = np.nan            # MoGe emits NaN in invalid regions
                 out.append({
                     "points": np.stack([
                         rng.random((H, W)), depth, rng.random((H, W)),
