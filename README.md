@@ -67,7 +67,7 @@ docker run --rm --gpus all -p 8061:8061 -e PORT=8061 --ipc=host my_lang_segm
 | lang_segm | GPU | Text-guided segmentation (LangSAM) |
 | textEmbedding | GPU / CPU | Sentence-BERT text embeddings |
 | vggt | GPU | 3D reconstruction from image sequences |
-| yologpt | GPU | YOLOv11 detection & tracking |
+| yolo | GPU / CPU | Object detection (YOLOv8n via ultralytics) on images and videos |
 | opencv_box | GPU / CPU | Optical flow, feature matching, similarity checks |
 | moge_box | GPU | MoGe-3 monocular 3D geometry (depth / points / normals) — CUDA-only |
 

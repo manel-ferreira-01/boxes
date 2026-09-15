@@ -100,10 +100,10 @@ def test_tapnext_session_injection(reg, store):
 
 
 def test_out_of_scope_boxes_absent(reg, store):
-    """yologpt / opencv_box are skipped until they migrate to the shared
-    envelope (see README) — the registry is the source of truth."""
+    """opencv_box is skipped until it migrates to the shared envelope
+    (see README) — the registry is the source of truth."""
     ids = {d.id for d in reg}
-    assert "yologpt" not in ids and "opencv" not in ids
+    assert "opencv" not in ids
 
 
 # ------------------------------------------------------------------- strict

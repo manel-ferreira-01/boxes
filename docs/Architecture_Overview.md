@@ -36,8 +36,8 @@ per-box) and a `data` map of named, typed values (images, tensors, blobs).
 Full request/response contract: see
 [gRPC_Services_Reference](gRPC_Services_Reference.md).
 
-A few boxes predate the shared contract and use extra RPCs (`yologpt`'s
-`DetectSequence`/`TrackSequence`, `opencv_box`'s `similarity_check`); they still move `Envelope`s around and
+One box predates the shared contract and uses an extra RPC (`opencv_box`'s
+`similarity_check`); it still moves `Envelope`s around and
 can be called through `boxes_client.run(..., method=...)` where the client
 vendored proto allows it.
 

@@ -48,7 +48,7 @@ def test_defs_endpoint_shape(client):
     r = client.get("/api/defs")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["defs"]) == 6      # yologpt/opencv out of scope (pre-contract)
+    assert len(body["defs"]) == 7     # opencv out of scope (pre-contract)
     assert "image_upload" in body["vocabulary"]["widgets"]
     assert "overlay" in body["vocabulary"]["visualizers"]
 

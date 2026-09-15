@@ -7,7 +7,7 @@ Design (mirrors ``boxes_client``):
   request, and upload tokens.  No network.  Fully unit-testable.
 * :func:`execute` is the only function that touches the wire: only the
   contract RPC ``Process`` via ``boxes_client.Box``.  Boxes that still serve
-  bespoke RPCs (yologpt, opencv_box) are out of scope until they migrate to
+  bespoke RPCs (opencv_box) are out of scope until they migrate to
   the shared envelope — :func:`build_call` refuses non-``Process`` methods
   with a clear error.
 

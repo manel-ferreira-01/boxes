@@ -29,7 +29,5 @@ message Envelope {
 
 // Universal service interface
 service PipelineService {
-  rpc TrackSequence(Envelope) returns  (Envelope);
-  rpc DetectSequence(Envelope) returns (Envelope);
-  rpc AllProcessing(Envelope) returns (Envelope);
+  rpc Process(Envelope) returns (Envelope);
 }

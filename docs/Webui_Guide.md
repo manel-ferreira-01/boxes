@@ -10,7 +10,7 @@
 ```
    browser / curl ──HTTP──▶ webui (FastAPI, box-agnostic core)
                                   │  boxes_client.Box.run(...)
-   box by IP:port (Process Envelope) ── clip · tapnext · lang_sam · sbert · vggt
+   box by IP:port (Process Envelope) ── clip · tapnext · lang_sam · sbert · vggt · yolo
 ```
 
 **Design rule (inherited from `boxes_client`):** the core is *smart about
@@ -20,22 +20,23 @@ box = one YAML file, never code. The per-box README under `images/` stays the
 authoritative request-shape source; defs link to them via `docs:`.
 
 **Scope is contract-only:** every box is served through the one shared
-`Process` RPC. `yologpt` and `opencv_box` are deliberately excluded (pre-
-contract RPCs); re-adding them later = new YAML defs only (`build_call`
-refuses non-`Process` methods with a clear error until then).
+`Process` RPC. `opencv_box` is deliberately excluded (pre-contract second
+RPC); re-adding it later = new YAML def only (`build_call` refuses
+non-`Process` methods with a clear error until then).
 
 ## 2. Current state (verified)
 
 | Layer | State |
 |---|---|
-| Backend | **51/51 tests green** (`python3 -m pytest tests/ -q` from `webui/`), live-verified against the running fleet (clip, lang_sam, tapnext; error paths 400/502) + an API-level vggt round trip (`fake_vggt`: namespaced call, torch tensors with full shape, GLB served as `model/gltf-binary`) + a live MoGe round trip through the `points` visualizer (701k reprojected points, photo-colored, no page errors — `webui/web/.moge_points_e2e.cjs`) |
+| Backend | **52/52 tests green** (`python3 -m pytest tests/ -q` from `webui/`), live-verified against the running fleet (clip, lang_sam, tapnext; error paths 400/502) + an API-level vggt round trip (`fake_vggt`: namespaced call, torch tensors with full shape, GLB served as `model/gltf-binary`) + a live MoGe round trip through the `points` visualizer (701k reprojected points, photo-colored, no page errors — `webui/web/.moge_points_e2e.cjs`). The standard `yolo` box is covered by `boxes/yolo.yaml` + `test_yolo_detection_def` (registry) — a defs-only addition, no code. |
 | Frontend | `tsc --noEmit && vite build` clean; `web/dist` auto-mounted by the FastAPI app (API + `/docs` keep priority) |
 | Session fixes applied | ✅ tab-switch state leakage (console now remounts per def), ✅ video input for tapnext (`video_frames` widget), ✅ tapnext tracks `(y,x)` order corrected + per-frame visibility toggle, ✅ labeled/legend heatmaps (clip), ✅ input mosaic |
 
 Still **unverified in-browser / live**: vggt GLB orbit + tensor cards
 (the API path is covered by `fake_vggt`, but camera auto-fit still needs
 a real reconstruction), pixel-level pass of `overlay`, history click-through.
-yologpt/opencv intentionally out of scope.
+opencv_box intentionally out of scope (pre-contract second RPC); the new
+standard `yolo` box covers object detection via `boxes/yolo.yaml`.
 
 ## 3. Run / build / test loop
 
@@ -44,7 +45,7 @@ yologpt/opencv intentionally out of scope.
 pip install -e boxes_client && pip install -e webui
 
 # backend tests
-cd webui && python3 -m pytest tests/ -q            # 51 passed in ~4 s
+cd webui && python3 -m pytest tests/ -q            # 52 passed in ~4 s
 
 # frontend: typecheck + build (dist/ is served by the app)
 cd webui/web && npx tsc --noEmit && npx vite build  # warn: three.js >500 kB chunk (cosmetic)
@@ -187,6 +188,8 @@ Def-driven extras (generic, no box names in code):
    Live e2e: `node webui/web/.moge_points_e2e.cjs` (canvas check + screenshot).
 3. In-browser human pass: `overlay` pixel check, glb orbit, history
    click-through (all code-built and data-verified, just not eyeballed).
-4. Optional: side-by-side prompts on lang_sam; `image_grid` for yologpt
-   once it migrates to the envelope.
+4. ~~`image_grid` for yologpt once it migrates~~ — the repo now ships a
+   standard `yolo` box (`images/yolo`, envelope-conformant, ultralytics) with a
+   webui def (`boxes/yolo.yaml`): `image_grid` over the annotated frames,
+   `table` over the per-frame detection JSON.
 5. Optional: code-split the three.js chunk (currently one ~780 kB bundle).

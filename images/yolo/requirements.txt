@@ -1,0 +1,9 @@
+grpcio
+protobuf
+grpcio-reflection
+grpcio-status
+torch==2.3.1
+torchvision==0.18.1
+numpy==1.26.1
+opencv-python-headless
+ultralytics==8.4.153

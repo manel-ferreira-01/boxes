@@ -1,0 +1,75 @@
+# YOLO box — stateless object detection on images and videos.
+# Authoritative request shape: ../../images/yolo/README.md
+id: yolo
+name: "YOLO · object detection (images & video)"
+box_key: yolo
+docs: ../../images/yolo/README.md
+note: >
+  Stateless: one call detects over every frame you send. Send image files
+  (or a video — frames are extracted in your browser) for client-side frame
+  delivery, or upload a raw video file and the box decodes it server-side.
+
+inputs:
+  - field: images
+    widget: video_frames
+    kind: bb
+    multiple: true
+    required: false
+    helper: >
+      image files, or a video (mp4/webm/mov) whose frames are extracted in
+      your browser and sent as images.
+  - field: video
+    widget: file_upload
+    kind: b
+    multiple: false
+    required: false
+    helper: >
+      raw video file (mp4/avi/webm/mov) — the box decodes it server-side
+      (see frame_step / max_frames). Send either this or images, not both.
+
+command:
+  values: [detect, reset]
+  default: detect
+
+parameters:
+  - key: conf
+    widget: slider
+    min: 0.0
+    max: 1.0
+    step: 0.05
+    default: 0.25
+  - key: iou
+    widget: slider
+    min: 0.0
+    max: 1.0
+    step: 0.05
+    default: 0.7
+  - key: imgsz
+    widget: select
+    values: ["320", "416", "640", "960"]
+    default: "640"
+  - key: classes
+    widget: tags
+    placeholder: "class ids to keep (e.g. 16 = dog); empty = all classes"
+  - key: save_annotated
+    widget: select
+    values: ["true", "false"]
+    default: "true"
+  - key: frame_step
+    widget: number
+    default: 1
+    placeholder: "video: sample every Nth frame"
+  - key: max_frames
+    widget: number
+    default: 128
+    placeholder: "video: safety cap on decoded frames"
+
+results:
+  - field: annotated
+    visualizer: image_grid
+    caption: "annotated frames (JPEG)"
+  - field: detections
+    visualizer: table
+    caption: "per-frame detections (boxes xyxy, class id, label, score)"
+  - field: "*"
+    visualizer: json

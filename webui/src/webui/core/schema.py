@@ -119,7 +119,7 @@ class ActionDef(_Def):
 
     The envelope contract only defines one RPC (``Process``), so actions are
     today *named commands* over that single RPC (with their own parameter
-    sets); the field stays so pre-contract boxes (yologpt, opencv_box) can be
+    sets); the field stays so pre-contract boxes (opencv_box) can be
     re-expressed the moment they migrate — and so any box can offer
     "action = X" forms later without an API change.  Non-``Process``
     ``method`` values are rejected by ``build_call`` until then.
@@ -195,7 +195,7 @@ class BoxDef(_Def):
 
     * standard boxes  -> ``config.<box_key>.{command, parameters, <section keys>, session_id}``
     * ``flat_config`` -> everything at the top level of ``config_json``
-      (legacy shapes: vggt, yologpt)
+      (legacy shapes: vggt)
 
     The box's ``docs`` link keeps the *box README* the authoritative source;
     the definition is a view over it, not a replacement.

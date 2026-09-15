@@ -1,6 +1,6 @@
 # boxes-webui
 
-> **Status: current** — backend (51 tests, live-verified) and the
+> **Status: current** — backend (52 tests, live-verified) and the
 > SPA (`web/`: fleet page, def-driven console, all 11 visualizers) are built,
 > and a session of fixes landed: tab-state isolation, video input for
 > tapnext, per-frame track visibility, labeled heatmaps, input mosaic.
@@ -15,7 +15,7 @@ YAML box definitions, HTTP API, and `boxes_client` under the hood.
    browser / curl ──HTTP──▶ webui (FastAPI, core/*, boxes_agnostic)
                                   │
                                   ▼  boxes_client.Box.run(...)
-   box by IP:port (Process Envelope) ── clip · tapnext · lang_sam · sbert · vggt
+   box by IP:port (Process Envelope) ── clip · tapnext · lang_sam · sbert · vggt · yolo
 ```
 
 **Design rule (inherited from `boxes_client`):** the core is *smart about
@@ -32,14 +32,12 @@ so *adding a box = one YAML file*, never code.
 | lang_segm | ✅ | standard envelope |
 | textEmbedding (sbert) | ✅ | standard envelope |
 | vggt | ✅ | standard envelope (legacy flat config, supported via `flat_config`) |
-| **yologpt** | ⏸ **skipped** | predates the contract: serves `DetectSequence`/`TrackSequence`, not `Process` |
+| yolo | ✅ | standard envelope; detection over images and/or a decoded video |
 | **opencv_box** | ⏸ **skipped** | serves `similarity_check` as a second RPC |
 
 The skip is deliberate: the webui stays **contract-only** (one stub, `Process`,
-for every box). When those two boxes migrate to the shared envelope
-(see the "Method dispatch caveat" in
-[`boxes_client/README.md`](../boxes_client/README.md)), drop their YAML
-definitions into `boxes/` — no code changes needed. Defs that request a
+for every box). When opencv_box migrates to the shared envelope, drop its YAML
+definition into `boxes/` — no code changes needed. Defs that request a
 non-`Process` `method` are refused with a clear error (`build_call`).
 
 ## Quick start
@@ -154,7 +152,7 @@ to them, and `note:` fields record where the webui's view might lag.
 
 ```bash
 cd webui
-python -m pytest tests/ -q          # 51 tests: registry, caller (pure), API e2e
+python -m pytest tests/ -q          # 52 tests: registry, caller (pure), API e2e
 ```
 
 E2E tests spin up real fake boxes over gRPC (the `fake_box_smoke.py` pattern)
@@ -206,5 +204,7 @@ in-memory by design; `fleet.json` is the only durable state.
    (tapnext, steps assembled from call history), `matrix` (clip/sbert),
    `tensor`, `glb` (vggt, three.js) + `image_grid`/`table`/`json`/`download`
 4. **next** — polish: vggt camera auto-fit on a real reconstruction
-   (needs a live vggt box), side-by-side prompts on lang_sam, `image_grid`
-   for yologpt once it migrates to the envelope (out of scope)
+   (needs a live vggt box), side-by-side prompts on lang_sam
+5. **done** — standard `yolo` box (image + video detection) added to the webui
+   via [`boxes/yolo.yaml`](boxes/yolo.yaml) → `image_grid` (annotated) + `table`
+   (per-frame detections); no code changes, one YAML file

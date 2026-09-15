@@ -531,7 +531,7 @@ lines you can drop into `fleet/docker-compose.yml`.
 ### What is (and isn't) published
 
 - Published: `clip`, `tapnext_tracker`, `lang_segm`, `textembedding`,
-  `opencv_box`, `yologpt`, `vggt` (the seven in the workflow matrix).
+  `opencv_box`, `yolo`, `vggt`, `moge_box` (the 8 in the workflow matrix).
 - `vggt` is the heaviest build: its Dockerfile clones
   `facebookresearch/vggt` and downloads the ~5 GB `VGGT-1B` checkpoint at
   build time (both were previously missing from the repo; the build is now
