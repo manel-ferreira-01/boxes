@@ -15,7 +15,7 @@ def reg():
     return load_registry(BOXES_DIR)
 
 
-EXPECTED_IDS = {"clip", "tapnext", "lang_sam", "sbert", "vggt"}
+EXPECTED_IDS = {"clip", "tapnext", "lang_sam", "sbert", "vggt", "moge"}
 
 
 def test_out_of_scope_boxes_are_absent(reg):
@@ -26,7 +26,7 @@ def test_out_of_scope_boxes_are_absent(reg):
     assert "yologpt" not in ids and "opencv" not in ids
 
 
-def test_all_seven_load(reg):
+def test_all_defs_load(reg):
     ids = {d.id for d in reg}
     assert ids == EXPECTED_IDS, ids
 
@@ -77,6 +77,25 @@ def test_vggt_namespaced_and_glb(reg):
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
     assert viz["glb_file"] == "glb"
     assert viz["depth"] == "tensor"
+
+
+def test_moge_maps_are_visualized_per_item(reg):
+    d = reg.get("moge")
+    assert not d.flat_config and d.box_key == "moge"
+    assert set(d.command.values) == {"infer", "reset"}
+    assert d.command.default == "infer"
+    params = {p.key for p in d.parameters}
+    assert params == {"fov_x", "refine_steps", "resolution_level"}
+    # bool param: the wire passes parameters through raw, so a "false"
+    # string would read as truthy on the box side -> kept out of the form
+    assert "fp16" not in params
+    props = {r.params.get("prop") for r in d.results if r.params}
+    assert {"depth", "normal", "points", "intrinsics"} <= props
+    maps = [r for r in d.results if r.visualizer == "field_map"]
+    assert {m.params["prop"] for m in maps} == {"depth", "normal", "points"}
+    overlays = [r for r in d.results if r.visualizer == "overlay"]
+    assert overlays and any(l.prop == "mask" for l in overlays[0].layers)
+    assert any(r.field == "*" for r in d.results)          # fallback renderer
 
 
 def test_non_process_refused():

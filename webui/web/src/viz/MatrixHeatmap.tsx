@@ -1,54 +1,52 @@
-/** Similarity/heatmap view for 2-D numeric values (inline arrays).
- *  Optional axis labels (row/col) + hover readout so a small similarity
- *  matrix reads as "image i × prompt j → value", not just colored cells. */
+/** Similarity/heatmap view for 2-D numeric values: inline arrays or buffer
+ *  artifacts (fetched only to render them), direct or per-item via ``prop``
+ *  (value = list of item dicts, one small matrix each — e.g. per-image
+ *  intrinsics).  Optional axis labels (row/col) + hover readout so a small
+ *  similarity matrix reads as "image i × prompt j → value", not just cells. */
 import { useEffect, useRef, useState } from "react";
-import { flattenNumbers, isRef, inlineValues, shapeStr } from "../resolvers";
+import { itemNumerics, isRef, shapeStr } from "../resolvers";
 
 export function MatrixHeatmap({
-  value, title, rowLabels, colLabels,
+  value, title, prop, rowLabels, colLabels,
 }: {
   value: unknown;
   title?: string;
+  prop?: string;
   rowLabels?: string[];
   colLabels?: string[];
 }) {
-  const [mat, setMat] = useState<{ rows: number; cols: number; data: number[] } | null>(null);
+  const [mats, setMats] = useState<{ rows: number; cols: number; data: number[] }[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
-    setMat(null); setNote(null);
-    const shape = isRef(value) ? ((value as { shape?: number[] }).shape ?? []) : [];
-    let out: { rows: number; cols: number; data: number[] } | null = null;
-    let err: string | null = null;
-    if (shape.length >= 2) {
-      const flat = inlineValues(value as never);
-      if (flat && flat.length === shape.reduce((a, b) => a * b, 1)) {
-        out = { rows: shape[0], cols: shape[1], data: flat };
-      } else {
-        err = "artifact: download below and open numerically (heatmap previews inline values only)";
-      }
-    } else {
-      const rows = Array.isArray(value) ? value : null;
-      if (rows && rows.every((r) => Array.isArray(r))) {
-        const cols = Math.max(...rows.map((r) => r.length));
-        const data: number[] = [];
-        for (const r of rows) for (let i = 0; i < cols; i++) data.push(Number((r as unknown[])[i]) || 0);
-        out = { rows: rows.length, cols, data };
-      } else {
-        const flat = flattenNumbers(value);
-        if (flat && flat.length < 256) {
-          // 1-D vector: render 1 x n
-          out = { rows: 1, cols: flat.length, data: flat };
-        } else {
-          err = "not a 2-D value";
+    let alive = true;
+    setMats(null); setNote(null);
+    void (async () => {
+      const out: { rows: number; cols: number; data: number[] }[] = [];
+      let err: string | null = null;
+      for (const m of await itemNumerics(value, prop)) {
+        if (m.shape.length === 2 && m.data.length === m.shape[0] * m.shape[1]) {
+          out.push({
+            rows: m.shape[0], cols: m.shape[1],
+            data: Array.from(m.data as ArrayLike<number>),
+          });
+        } else if (!err) {
+          err = `“${prop ?? "value"}” is not a flat 2-D value (got ${shapeStr(m.shape)})`;
         }
       }
-    }
-    if (out) setMat(out);
-    if (err) setNote(err);
-  }, [value]);
+      if (out.length === 0 && !err) {
+        err = isRef(value)
+          ? "artifact: download below and open numerically (heatmap previews 2-D values)"
+          : "not a 2-D value";
+      }
+      if (!alive) return;
+      if (out.length > 0) setMats(out);
+      else setNote(err);
+    })();
+    return () => { alive = false; };
+  }, [value, prop]);
 
-  if (!mat) {
+  if (mats === null) {
     return (
       <div>
         {title && <div className="viz-caption">{title}</div>}
@@ -59,26 +57,53 @@ export function MatrixHeatmap({
             <a href={(value as { url?: string }).url} download>download</a>
           </span>
         )}
+        {!note && !isRef(value) && <span className="spinnerbox"><span className="spinner" /></span>}
       </div>
     );
   }
 
-  const min = Math.min(...mat.data);
-  const max = Math.max(...mat.data);
-  const rowOk = rowLabels && rowLabels.length === mat.rows && mat.rows <= 200;
-  const colOk = colLabels && colLabels.length === mat.cols && mat.cols <= 200;
+  const withLabels = !prop && mats.length === 1;
+  const rowOk = withLabels ? rowLabels && rowLabels.length === mats[0].rows && mats[0].rows <= 200 : false;
+  const colOk = withLabels ? colLabels && colLabels.length === mats[0].cols && mats[0].cols <= 200 : false;
 
   return (
     <div>
-      {title && <div className="viz-caption">{title}</div>}
+      {title && mats.length === 1 && <div className="viz-caption">{title}</div>}
+      {mats.map((m, i) => (
+        <div key={i} className="overlay-per">
+          {(mats.length > 1 || i > 0) && (
+            <div className="cap viz-caption">{title ? `${title} · ` : ""}img {i + 1}</div>
+          )}
+          <MatrixSingle
+            rows={m.rows} cols={m.cols} data={m.data}
+            rowLabels={rowOk ? rowLabels! : undefined}
+            colLabels={colOk ? colLabels! : undefined}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MatrixSingle({
+  rows, cols, data, rowLabels, colLabels,
+}: {
+  rows: number; cols: number; data: number[];
+  rowLabels?: string[];
+  colLabels?: string[];
+}) {
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  return (
+    <div>
       <div style={{ marginBottom: 6, color: "var(--fg-dim)", fontSize: 12 }}>
-        {mat.rows} × {mat.cols} · min {min.toFixed(4)} · max {max.toFixed(4)}
+        {rows} × {cols} · min {min.toFixed(4)} · max {max.toFixed(4)}
       </div>
       <div className="matrixbox">
         <HeatCanvas
-          rows={mat.rows} cols={mat.cols} data={mat.data}
-          rowLabels={rowOk ? rowLabels! : undefined}
-          colLabels={colOk ? colLabels! : undefined}
+          rows={rows} cols={cols} data={data}
+          rowLabels={rowLabels}
+          colLabels={colLabels}
         />
       </div>
     </div>

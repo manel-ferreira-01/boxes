@@ -19,6 +19,7 @@ import { JsonTree, RenderValue } from "../viz/JsonTree";
 import { DataTable } from "../viz/DataTable";
 import { ImageGrid } from "../viz/ImageGrid";
 import { MatrixHeatmap } from "../viz/MatrixHeatmap";
+import { FieldMap } from "../viz/FieldMap";
 import { TensorView } from "../viz/TensorView";
 import { OverlayViz } from "../viz/OverlayViz";
 import { TracksPlayer } from "../viz/TracksPlayer";
@@ -664,7 +665,9 @@ function ResultBlock({
     case "image_grid":
       return <ImageGrid value={v} title={title} />;
     case "matrix": {
-      // axis labels, declared on the result def (params: {row_labels/col_labels: <input field>})
+      // axis labels, declared on the result def (params: {row_labels/col_labels: <input field>});
+      // params.prop: pick a sub-field of each per-item dict (one small matrix per item)
+      const params = rd.params ?? {};
       const labels = (field: unknown): string[] | undefined => {
         if (typeof field !== "string" || !current) return undefined;
         const arr = current.texts[field];
@@ -679,8 +682,21 @@ function ResultBlock({
         <MatrixHeatmap
           value={v}
           title={title}
-          rowLabels={labels((rd.params ?? {})["row_labels"])}
-          colLabels={labels((rd.params ?? {})["col_labels"])}
+          prop={typeof params["prop"] === "string" ? params["prop"] : undefined}
+          rowLabels={labels(params["row_labels"])}
+          colLabels={labels(params["col_labels"])}
+        />
+      );
+    }
+    case "field_map": {
+      // per-item numeric map as an image (H×W heat or H×W×3 RGB);
+      // params.prop names the item field (box-specific name lives in the def only)
+      const prop = (rd.params ?? {})["prop"];
+      return (
+        <FieldMap
+          value={v}
+          prop={typeof prop === "string" ? prop : undefined}
+          title={title}
         />
       );
     }

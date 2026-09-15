@@ -130,6 +130,46 @@ export async function statsOf(v: unknown): Promise<{
   return { min, max, mean: sum / flat.length, n: flat.length };
 }
 
+/** shape of a nested JSON array (best effort) — mirrors shapeOf on the console. */
+export function inlineShape(values: unknown): number[] {
+  const out: number[] = [];
+  let cur: unknown = values;
+  while (Array.isArray(cur) && cur.length > 0) {
+    out.push(cur.length);
+    cur = cur[0];
+  }
+  return out;
+}
+
+/** Per-item numeric resolution for result values that are a *list of items*
+ *  (one dict per input image): pick ``item[prop]`` (or the value itself)
+ *  and materialize the numbers — inline arrays stay inline, buffer
+ *  artifacts are fetched only because the visualizer must render them.
+ *  Non-numeric cells are skipped (visualizers degrade, never break). */
+export async function itemNumerics(
+  v: unknown, prop?: string,
+): Promise<{ data: ArrayLike<number>; shape: number[]; url: string | null }[]> {
+  const items: unknown[] = Array.isArray(v) ? v : [v];
+  const out: { data: ArrayLike<number>; shape: number[]; url: string | null }[] = [];
+  for (const it of items) {
+    const cell = prop && it && typeof it === "object" && !Array.isArray(it)
+      ? (it as Record<string, unknown>)[prop]
+      : it;
+    if (cell === undefined || cell === null) continue;
+    const url = refUrl(cell);
+    if (isRef(cell)) {
+      const t = await fetchTyped(cell as SerValue);
+      if (t && t.data.length > 0) out.push({ data: t.data, shape: t.shape, url });
+      continue;
+    }
+    const flat = flattenNumbers(cell);
+    if (flat && flat.length > 0) {
+      out.push({ data: flat, shape: inlineShape(cell), url: null });
+    }
+  }
+  return out;
+}
+
 export function shapeStr(shape: unknown): string {
   if (!Array.isArray(shape) || shape.length === 0) return "scalar";
   return `[${shape.join(", ")}]`;

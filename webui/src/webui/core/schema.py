@@ -37,6 +37,7 @@ VISUALIZERS: frozenset[str] = frozenset({
     "image_grid",     # list of image bytes
     "overlay",        # base image + typed layers (box/mask/point/flow)
     "matrix",         # similarity/heat matrices
+    "field_map",      # per-item numeric map as an image (H×W heat or H×W×3 RGB)
     "tensor",         # shape/dtype/summary of a numeric array
     "glb",            # glTF binary 3D model (three.js)
     "tracks_player",  # frames + tracks/visibles animation

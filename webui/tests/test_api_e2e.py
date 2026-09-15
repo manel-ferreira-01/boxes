@@ -48,7 +48,7 @@ def test_defs_endpoint_shape(client):
     r = client.get("/api/defs")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["defs"]) == 5      # yologpt/opencv out of scope (pre-contract)
+    assert len(body["defs"]) == 6      # yologpt/opencv out of scope (pre-contract)
     assert "image_upload" in body["vocabulary"]["widgets"]
     assert "overlay" in body["vocabulary"]["visualizers"]
 
@@ -127,6 +127,42 @@ def test_vggt_full_round_trip(client, fake_vggt):
     tok = glb["url"].rsplit("/", 1)[-1]
     g = client.get(f"/api/file/{tok}")
     assert g.status_code == 200 and g.content[:4] == b"glTF"
+
+
+def test_moge_full_round_trip(client, fake_moge):
+    """The full panel path for per-image map dicts: namespaced call,
+    large 2-D / H×W×3 maps as typed buffer artifacts (field_map renders
+    them), small intrinsics kept inline (matrix `prop` path)."""
+    fid = _seed(client, fake_moge, "moge lab", "moge")
+    up = client.post("/api/upload",
+                     files={"file": ("scene.jpg", io.BytesIO(b"jpeg-bytes"),
+                                    "image/jpeg")})
+    assert up.status_code == 201, up.text
+    r = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"images": [up.json()["ref"]]},
+        "parameters": {"refine_steps": 2, "resolution_level": 5, "fov_x": 55.0},
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["box"] == "moge" and body["status"] == "done"
+    assert body["declared_encoding"] == "zstd_pickle"
+    item = body["fields"]["results"][0]
+    assert set(item) == {"points", "depth", "intrinsics", "mask", "normal"}
+    # large maps -> typed buffer artifacts (not inline, not pickle)
+    depth = item["depth"]
+    assert depth["kind"] == "buffer" and depth["dtype"] == "float32"
+    assert depth["shape"] == [320, 256] and depth["size"] == 320 * 256 * 4
+    normal = item["normal"]
+    assert normal["kind"] == "buffer" and normal["shape"] == [320, 256, 3]
+    # intrinsics stay inline -> the matrix `prop` path can read them
+    intr = item["intrinsics"]
+    assert intr["kind"] == "array" and intr["shape"] == [3, 3]
+    # buffer artifact fetchable byte-identical
+    tok = depth["url"].rsplit("/", 1)[-1]
+    raw = client.get(f"/api/file/{tok}").content
+    assert len(raw) == depth["size"]
 
 
 def test_box_error_surfaces_as_status(client, std_pb):

@@ -155,6 +155,58 @@ def fake_vggt(std_pb):
     return FakeBox(FakeVGGT(), pb2, pb2_grpc)
 
 
+@pytest.fixture
+def fake_moge(std_pb):
+    """Mimics the moge_box contract: images in; per-image dicts
+    (depth/points/mask/normal/intrinsics) zstd_pickle'd into data.results,
+    declared encoding in the response config (the real box's contract).
+    The large 2-D/3-ch maps exceed the inline cap so the typed-buffer
+    branch of the serializer must engage."""
+    import numpy as np
+    import zstandard as zstd
+    pb2, pb2_grpc, aux = std_pb
+
+    H, W = 320, 256
+
+    class FakeMoGe(pb2_grpc.PipelineServiceServicer):
+        def Process(self, request, context):
+            cfg = json.loads(request.config_json) if request.config_json else {}
+            sc = cfg.get("moge")
+            if sc is None:
+                sc = cfg          # legacy flat shape
+            if sc.get("command") == "reset":
+                return pb2.Envelope(config_json=json.dumps(
+                    {"moge": {"status": "done", "action": "reset"}}))
+            imgs = list(aux.unwrap_value(request.data.get("images")) or [])
+            if not imgs:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"moge": {"status": "empty_request"}}))
+            out = []
+            for n in range(len(imgs)):
+                rng = np.random.default_rng(7 + n)
+                depth = (2.0 + 4.0 * rng.random((H, W))).astype(np.float32)
+                out.append({
+                    "points": np.stack([
+                        rng.random((H, W)), depth, rng.random((H, W)),
+                    ], axis=-1).astype(np.float32),
+                    "depth": depth,
+                    "intrinsics": np.array(
+                        [[512.0, 0.0, W / 2], [0.0, 512.0, H / 2],
+                         [0.0, 0.0, 1.0]], dtype=np.float32),
+                    "mask": np.ones((H, W), dtype=np.uint8),
+                    "normal": rng.uniform(-1, 1, (H, W, 3)).astype(np.float32),
+                })
+            blob = zstd.ZstdCompressor().compress(pickle.dumps(out, protocol=4))
+            env = pb2.Envelope(config_json=json.dumps(
+                {"moge": {"status": "done", "num_images": len(imgs),
+                          "runtime": 1.5, "device": "cuda",
+                          "encoding": "zstd_pickle"}}))
+            env.data["results"].CopyFrom(aux.wrap_value(bytes(blob)))
+            return env
+
+    return FakeBox(FakeMoGe(), pb2, pb2_grpc)
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_boxes():
     """Stop FakeBoxes created during this test (best-effort)."""
