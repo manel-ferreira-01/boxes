@@ -42,6 +42,8 @@ def sniff_mime(data: bytes) -> str:
         return "model/gltf-binary"
     if len(data) > 12 and data[4:8] == b"ftyp":
         return "video/mp4"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
     if data[:4] == b"%PDF":
         return "application/pdf"
     return "application/octet-stream"

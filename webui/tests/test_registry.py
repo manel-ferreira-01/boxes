@@ -112,15 +112,28 @@ def test_yolo_detection_def(reg):
     assert d.command.default == "detect"
     assert {f.field for f in d.inputs} == {"images", "video"}
     params = {p.key for p in d.parameters}
-    assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
+    assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames", "batch"} == params
+    # chunked inference bound: VRAM peak scales with batch, not with N frames
+    batch = next(p for p in d.parameters if p.key == "batch")
+    assert batch.widget == "number" and batch.default == 16
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
     # panel order: annotated video (video input) -> annotated grid (image
-    # input only: renders when annotated_video is absent) -> detections table
-    assert viz == {"annotated_video": "video", "annotated": "image_grid", "detections": "table"}
+    # input only: renders when annotated_video is absent) -> zip download -> table
+    assert viz == {
+        "annotated_video": "video",
+        "annotated": "image_grid",
+        "annotated_zip": "download",
+        "detections": "table",
+    }
     assert [r.field for r in d.results if r.field != "*"][0] == "annotated_video"
     grid = next(r for r in d.results if r.field == "annotated")
     assert grid.visualizer == "image_grid"
     assert grid.only_if_missing == "annotated_video"   # hidden for video input
+    zipr = next(r for r in d.results if r.field == "annotated_zip")
+    assert zipr.visualizer == "download"
+    assert zipr.params.get("filename") == "yolo-annotations.zip"
+    tabler = next(r for r in d.results if r.field == "detections")
+    assert tabler.params.get("filename") == "yolo-detections.json"
     assert d.input_mosaic is False   # annotated result already shows the input
     assert d.results[-1].field == "*"
 

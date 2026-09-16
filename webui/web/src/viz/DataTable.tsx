@@ -1,14 +1,40 @@
-/** Data table for list-of-objects or 2-D numeric values. */
+/** Data table for list-of-objects or 2-D numeric values.
+ *  Also supports a "Download JSON" button driven by the ``filename`` prop. */
 import { useMemo } from "react";
 import { flattenNumbers, isRef, inlineValues, shapeStr } from "../resolvers";
 
-export function DataTable({ value, title }: { value: unknown; title?: string }) {
+function downloadAs(filename: string, content: string, mime = "application/json") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function DataTable({ value, title, filename }: {
+  value: unknown; title?: string; filename?: string;
+}) {
   const model = useMemo(() => toModel(value), [value]);
-  if (!model) return <Fallback value={value} />;
+  if (!model) return <Fallback value={value} filename={filename} />;
   const rows = model.rows.slice(0, 80);
   return (
     <div>
-      {title && <div className="viz-caption">{title}</div>}
+      {title && (
+        <div className="viz-caption" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{title}</span>
+          {filename && (
+            <button
+              className="btn small"
+              title={`Download as ${filename}`}
+              onClick={() => downloadAs(filename, JSON.stringify(value, null, 2))}
+            >
+              ↓ {filename}
+            </button>
+          )}
+        </div>
+      )}
       <div className="tablewrap">
         <table className="data">
           <thead>
@@ -34,7 +60,6 @@ function cell(c: unknown): string {
 }
 
 function toModel(value: unknown): { cols: string[]; rows: unknown[][] } | null {
-  // array of objects -> columns
   if (Array.isArray(value) && value.length && value.every((x) => x && typeof x === "object" && !Array.isArray(x))) {
     const set = new Set<string>();
     for (const x of value) for (const k of Object.keys(x as object)) set.add(k);
@@ -49,7 +74,6 @@ function toModel(value: unknown): { cols: string[]; rows: unknown[][] } | null {
       }),
     };
   }
-  // 2-D number matrix
   if (Array.isArray(value) && value.length && value.every((r) => Array.isArray(r) && r.every((x) => typeof x === "number"))) {
     const width = Math.max(...value.map((r) => r.length));
     return {
@@ -57,7 +81,6 @@ function toModel(value: unknown): { cols: string[]; rows: unknown[][] } | null {
       rows: value.map((r) => Array.from({ length: width }, (_, j) => (r[j] ?? null))),
     };
   }
-  // serialized array ref
   if (isRef(value)) {
     const flat = inlineValues(value as never);
     const shape = ((value as { shape?: unknown }).shape ?? []) as number[];
@@ -75,15 +98,13 @@ function toModel(value: unknown): { cols: string[]; rows: unknown[][] } | null {
     }
     return null;
   }
-  // list of scalars
   const flat = flattenNumbers(value);
   if (flat) return { cols: ["value"], rows: flat.slice(0, 200).map((x) => [x]) };
   return null;
 }
 
-function Fallback({ value }: { value: unknown }) {
+function Fallback({ value, filename }: { value: unknown; filename?: string }) {
   if (value === undefined || value === null) {
-    // field absent from this response (e.g. a reset/reply without results)
     return <div className="note">no value in this response</div>;
   }
   if (isRef(value)) {
@@ -92,12 +113,26 @@ function Fallback({ value }: { value: unknown }) {
         <span className="artifact">
           <span className="kind">artifact · {shapeStr((value as { shape?: unknown }).shape)}</span>
           {(value as { url?: string }).url && (
-            <a href={(value as { url?: string }).url} download>download</a>
+            <a href={(value as { url?: string }).url} download={filename}>download</a>
           )}
         </span>
         <div className="note">too structured for a table preview — download or view JSON below</div>
       </div>
     );
   }
-  return <pre className="json">{JSON.stringify(value, null, 2).slice(0, 4000)}</pre>;
+  const js = JSON.stringify(value, null, 2);
+  return (
+    <div>
+      {filename && (
+        <button
+          className="btn small"
+          style={{ marginBottom: 6 }}
+          onClick={() => downloadAs(filename, js)}
+        >
+          ↓ {filename}
+        </button>
+      )}
+      <pre className="json">{js.slice(0, 4000)}</pre>
+    </div>
+  );
 }

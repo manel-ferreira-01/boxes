@@ -27,6 +27,7 @@ fallback otherwise).
 """
 
 import concurrent.futures as futures
+import io
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ import sys
 import tempfile
 import threading
 import time
+import zipfile
 
 sys.path.append("./protos")
 import pipeline_pb2  # noqa: E402
@@ -57,6 +59,7 @@ _DEFAULTS = {
     "save_annotated": True,
     "frame_step": 1,
     "max_frames": 1024,
+    "batch": 16,  # max frames per forward pass — bounds the GPU peak (see Process)
 }
 
 
@@ -213,6 +216,7 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 parameters.get("save_annotated", _DEFAULTS["save_annotated"]), "save_annotated"),
             "frame_step": max(1, int(self._num(parameters, "frame_step", int))),
             "max_frames": max(1, int(self._num(parameters, "max_frames", int))),
+            "batch": max(1, int(self._num(parameters, "batch", int))),
         }
 
     # ---------------------------------------------------------------- inputs
@@ -278,6 +282,29 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                     pass
 
     @staticmethod
+    def _build_annotated_zip(
+        annotated: list,     # list of JPEG bytes, in frame order
+        detections_json: str,
+        manifest: dict,
+    ) -> bytes:
+        """Bundle annotated frames + detections + manifest into a single ZIP.
+
+        Layout:
+          frame_0001.jpg, frame_0002.jpg, …   (zero-padded, ordered)
+          detections.json                      (same payload as data.detections)
+          manifest.json                        (model, params, runtime, etc.)
+        """
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            width = max(len(str(len(annotated))), 1)
+            for idx, img_bytes in enumerate(annotated, start=1):
+                name = f"frame_{str(idx).zfill(width)}.jpg"
+                z.writestr(name, bytes(img_bytes))
+            z.writestr("detections.json", detections_json)
+            z.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+        return buf.getvalue()
+
+    @staticmethod
     def _encode_mp4(frames, fps):
         """Encode BGR frames into one MP4, preferring the **browser-playable
         H.264** (PyAV bundles the FFmpeg libraries incl. libx264).  Degrades
@@ -309,11 +336,22 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 tmp.close()
                 rate = max(1, int(round(fps))) if fps and fps > 0 else 30
                 container = av.open(tmp_path, mode="w")
-                stream = container.add_stream("libx264", rate=rate)
+                # Speed knobs: an annotated preview should not take as long to
+                # encode as it took to infer. ``preset=veryfast`` +
+                # ``tune=zerolatency`` trades ~3-5% quality (irrelevant for a
+                # preview of annotated frames) for ~3x encode speed, and in
+                # practice produces SMALLER files than the default ``medium``
+                # preset because it skips lookahead/GOP buffering.  ``crf=23``
+                # is the x264 default and fine for 720p-1080p previews.
+                stream = container.add_stream("libx264", rate=rate, options={
+                    "preset": "veryfast",
+                    "tune": "zerolatency",
+                    "crf": "23",
+                })
                 stream.width, stream.height, stream.pix_fmt = w2, h2, "yuv420p"
                 for frame in frames:
-                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    for pkt in stream.encode(av.VideoFrame.from_ndarray(rgb, format="rgb24")):
+                    vframe = av.VideoFrame.from_ndarray(frame, format="bgr24")
+                    for pkt in stream.encode(vframe):
                         container.mux(pkt)
                 for pkt in stream.encode(None):      # flush
                     container.mux(pkt)
@@ -445,16 +483,27 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 frames = self._decode_images(image_bytes_list)
                 frame_indices = list(range(len(frames)))
 
-            results = self._model(
-                frames,
-                conf=spec["conf"],
-                iou=spec["iou"],
-                imgsz=spec["imgsz"],
-                max_det=spec["max_det"],
-                classes=spec["classes"],
-                device=device,
-                verbose=False,
-            )
+            # Chunked inference: the ultralytics *list* path runs the whole list
+            # as ONE batch in a single forward pass (LoadPilAndNumpy yields it
+            # once; preprocess np.stacks it all to the GPU), so the VRAM peak
+            # would scale with len(frames) × imgsz².  Bounding each forward
+            # pass to spec["batch"] frames (default 16, ultralytics' own video
+            # default) keeps the spike constant regardless of max_frames.  
+            # Detection is strictly per-frame (no cross-frame state), so the
+            # chunked results are identical — order is preserved by extending.
+            results = []
+            for i in range(0, len(frames), spec["batch"]):
+                chunk = frames[i:i + spec["batch"]]
+                results.extend(self._model(
+                    chunk,
+                    conf=spec["conf"],
+                    iou=spec["iou"],
+                    imgsz=spec["imgsz"],
+                    max_det=spec["max_det"],
+                    classes=spec["classes"],
+                    device=device,
+                    verbose=False,
+                ))
             if len(results) != len(frames):
                 return _error(f"inference returned {len(results)} results for "
                               f"{len(frames)} frames (internal error)")
@@ -495,6 +544,28 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                         response_data["annotated_video"] = wrap_value(out_video)
                         encoding["annotated_video"] = "identity"
                         extra_status["annotated_video_codec"] = out_codec
+
+                # Single downloadable ZIP: all annotated frames + detections JSON + manifest.
+                # Lets the user grab everything in one click without iterating.
+                manifest = {
+                    "box": "yolo",
+                    "weights": self._current_weights,
+                    "source": source,
+                    "num_frames": len(frames),
+                    "num_detections": num_detections,
+                    "runtime_seconds": round(time.time() - start_time, 3),
+                    "parameters": {k: v for k, v in parameters.items()
+                                   if k not in ("images", "video")},
+                    "frame_indices": frame_indices,
+                }
+                detections_json_bytes = response_data["detections"].b  # raw JSON bytes
+                try:
+                    zip_bytes = self._build_annotated_zip(
+                        annotated, detections_json_bytes.decode("utf-8"), manifest)
+                    response_data["annotated_zip"] = wrap_value(zip_bytes)
+                    encoding["annotated_zip"] = "identity"
+                except Exception as e:
+                    logging.warning("annotated_zip build failed: %s", e)
 
             return pipeline_pb2.Envelope(
                 config_json=json.dumps({

@@ -4,6 +4,7 @@ id: tapnext
 name: "TAPNext · point tracking"
 box_key: tapnext
 docs: ../../images/tapnext_tracker/README.md
+input_mosaic: false   # the tracks player already shows the input frames overlaid; the mosaic is redundant
 note: >
   Send one frame per call; the box accumulates state across calls within a
   session. Never auto-reset (would kill the sequence): use the explicit

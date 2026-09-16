@@ -83,6 +83,7 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
 | `save_annotated`  | `true`  | also return the annotated frames as JPEGs                       |
 | `frame_step`      | `1`     | video only: sample every Nth frame                              |
 | `max_frames`      | `1024`  | safety cap on sampled frames per call                           |
+| `batch`           | `16`    | max frames per GPU forward pass — inference is chunked at this size, so the VRAM spike is bounded by `batch × imgsz²` instead of `N × imgsz²` (detection is per-frame: results are identical) |
 
 ### Response
 
@@ -195,6 +196,23 @@ The fleet convention: the model loads on **CPU at startup** (fast start, no
 VRAM), moves to CUDA **in place** on the first request (unless
 `parameters.device` says otherwise), and a watchdog thread moves it back to
 CPU after ~60 s idle. `parameters.device` always wins.
+
+Inference is **chunked**: N frames run in `⌈N / batch⌉` forward passes of
+≤ `batch` frames (default 16 — ultralytics' own video default). Without that,
+ultralytics' list path would stack every frame into one batch, and the VRAM
+peak would scale with the full frame count (≈1 GB for 128 frames @640, ≈10 GB
+for 1024 @640, plus host RAM holding all decoded frames).
+
+Raising `batch` uses more VRAM per pass (and fewer passes); lowering it
+further bounds the spike at the cost of a little latency.
+
+`annotated_video` (a video in, one annotated MP4 out) is encoded with H.264
+via x264 `preset=veryfast, tune=zerolatency, crf=23` — fast enough that a
+1080p/24-frame preview encodes in well under ~0.5 s on a modern CPU, and
+slightly smaller than x264's default `medium` preset.  For long videos
+(>~200 frames) consider `save_annotated: false` in the call to skip the
+per-frame JPEG encode and the MP4 re-encode entirely — the `detections`
+JSON is still returned.
 
 ## Test
 

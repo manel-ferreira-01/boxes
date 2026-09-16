@@ -668,7 +668,7 @@ function ResultBlock({
     case "json":
       return <JsonTree data={v} />;
     case "table":
-      return <DataTable value={v} title={title} />;
+      return <DataTable value={v} title={title} filename={rd.params?.filename as string || undefined} />;
     case "image_grid":
       return <ImageGrid value={v} title={title} />;
     case "matrix": {
@@ -773,6 +773,7 @@ function ResultBlock({
     case "download": {
       // A single file ref, or a list of them (e.g. per-frame JPEGs) → one
       // link per item.  No preview: the point is to grab the raw files.
+      const fname = rd.params?.filename as string | undefined;
       const refs = Array.isArray(v) && v.length > 0 && v.every(isRef)
         ? (v as SerRef[])
         : isRef(v) ? [v as SerRef] : [];
@@ -782,8 +783,9 @@ function ResultBlock({
           {refs.length
             ? refs.map((ref, i) => (
                 <span key={i} className="artifact">
-                  <span className="kind">{rd.field}{refs.length > 1 ? ` #${i + 1}` : ""}</span>
-                  <a href={(ref as { url?: string }).url} download>download</a>
+                  <span className="kind">{fname || rd.field}{refs.length > 1 ? ` #${i + 1}` : ""}</span>
+                  {typeof (ref as any).size === "number" && <span>{bytesShort((ref as any).size)}</span>}
+                  <a href={(ref as { url?: string }).url} download={fname || undefined}>{fname || "download"}</a>
                 </span>
               ))
             : <div className="note">no file artifact for {rd.field}</div>}

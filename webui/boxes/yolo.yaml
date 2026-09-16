@@ -63,7 +63,8 @@ parameters:
   - key: save_annotated
     widget: select
     values: ["true", "false"]
-    default: "true"
+    default: "false"
+    placeholder: "false = detections JSON only (fast even for long videos); true = also encodes annotated JPEGs + mp4 (H.264, ~0.4 s/24 frames)"
   - key: frame_step
     widget: number
     default: 1
@@ -72,6 +73,10 @@ parameters:
     widget: number
     default: 128
     placeholder: "video: safety cap on decoded frames"
+  - key: batch
+    widget: number
+    default: 16
+    placeholder: "max frames per GPU forward pass — bounds the VRAM spike (detection is per-frame, results identical)"
 
 results:
   # Video input: one annotated mp4 (source fps, H.264) is the view.
@@ -85,8 +90,16 @@ results:
     visualizer: image_grid
     caption: "annotated frames (one JPEG per input frame)"
     only_if_missing: annotated_video
+  # Download all annotated artifacts as a single ZIP (works for both inputs).
+  - field: annotated_zip
+    visualizer: download
+    caption: "download: annotated frames + detections + manifest (ZIP)"
+    params:
+      filename: "yolo-annotations.zip"
   - field: detections
     visualizer: table
     caption: "per-frame detections (boxes xyxy, class id, label, score)"
+    params:
+      filename: "yolo-detections.json"
   - field: "*"
     visualizer: json
