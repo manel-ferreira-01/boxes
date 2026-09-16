@@ -1,13 +1,29 @@
-"""YOLO box — object detection on images and videos (ultralytics).
+"""YOLO box — object detection AND tracking on images and videos
+(ultralytics BoT-SORT-class tracker, every call).
 
-A standard shared-envelope box, stateless and clip-shaped:
+A standard shared-envelope box with **per-session tracker state** (the same
+multi-session contract as ``tapnext`` — see its service for the pattern):
 
 * ``data["images"]`` — list of image bytes (JPEG/PNG/…); one detection
   record per image.
 * ``data["video"]``  — one video file (mp4/avi/webm/mov); the box decodes
   it server-side (OpenCV/ffmpeg), samples ``frame_step``, and returns one
   detection record per sampled frame (with the original frame index).
-* ``command: reset`` — accepted as a no-op (the box holds no state).
+* **Tracking is always on**: every call runs the model in ``track`` mode, so
+  detections carry a per-session ``track_id`` (the tracker state is a
+  byproduct of detection, not a separate mode).
+* ``session_id`` (section top level; omitted -> shared ``default`` session)
+  keys the tracker state: same session = stable IDs across calls; different
+  sessions = independent ID sequences.  Server-side sessions are reaped
+  after ``YOLO_SESSION_TTL`` idle (default 1800 s; 0 keeps them forever).
+* ``command: reset`` — clears **this session's** tracker state (other
+  sessions untouched); when it is the only live session the tracker's id
+  counter is also rewound so IDs restart from the base.
+* ``command: list`` — operator view of active sessions (id/opaque only).
+
+One YOLO model is shared by all sessions; the ultralytics *tracker* object
+(owned by the session) is attached to the shared predictor per call — so a
+session switch costs nothing but the small tracker state.
 
 GPU lifecycle (fleet convention): the model loads on CPU at startup, moves
 to CUDA in place on the first request (unless ``parameters.device`` says
@@ -51,6 +67,8 @@ _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 _IDLE_TIMEOUT = 60  # seconds
 
 _DEFAULT_WEIGHTS = os.getenv("YOLO_WEIGHTS", "yolov8n.pt")  # runtime download
+_DEFAULT_SESSION = "default"
+_SESSION_TTL = int(os.getenv("YOLO_SESSION_TTL", "1800") or 1800)  # 0 = keep forever
 _DEFAULTS = {
     "conf": 0.25,
     "iou": 0.70,
@@ -59,8 +77,23 @@ _DEFAULTS = {
     "save_annotated": True,
     "frame_step": 1,
     "max_frames": 1024,
-    "batch": 16,  # max frames per forward pass — bounds the GPU peak (see Process)
 }
+
+
+class _Session:
+    """Per-session tracker state (the tapnext multi-session pattern).
+
+    The *tracker object* is owned by the session; it is attached to the
+    shared predictor only for the duration of a call (see
+    ``_track_frames``), so one YOLO model serves every session."""
+
+    __slots__ = ("tracker", "last_used", "created", "frames")
+
+    def __init__(self):
+        self.tracker = None
+        self.created = time.time()
+        self.last_used = self.created
+        self.frames = 0
 
 
 def _error(message, extra=None):
@@ -109,6 +142,17 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
         self._last_request_time = time.time()
         self._lock = threading.Lock()
 
+        # Multi-session tracker state (see module docstring).
+        self._sessions = {}
+        self._sessions_lock = threading.Lock()
+        self._session_ttl = _SESSION_TTL
+        # Serializes "attach session tracker -> track -> adopt" so concurrent
+        # calls from different sessions can't cross-wire predictors.
+        self._track_lock = threading.Lock()
+        # predictor ids whose TRACKTRACK setup hook was attached (idempotence
+        # guard — calling it twice would double-wrap the predictor).
+        self._tracker_setups = set()
+
         # Background thread to monitor idle time.
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
@@ -147,6 +191,15 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
     def _watchdog_loop(self):
         while True:
             time.sleep(10)  # check every 10s
+            # A session holding a live tracker MUST not have the GPU snatched:
+            # .to() resets ultralytics' cached predictor, and the next
+            # track() would build a fresh tracker -> track-id drift in a
+            # live session (state must not silently invalidate).  Sessions
+            # are TTL-reaped, so the GPU is released once they go quiet.
+            with self._sessions_lock:
+                live_trackers = any(s.tracker is not None for s in self._sessions.values())
+            if live_trackers:
+                continue
             with self._lock:
                 idle_time = time.time() - self._last_request_time
                 if idle_time > _IDLE_TIMEOUT and self._device.startswith("cuda"):
@@ -167,6 +220,115 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 self._model.to(target)
                 self._device = target
         return self._device
+
+    # ---------------------------------------------------------------- sessions
+    def _reap_idle_sessions(self):
+        """Drop sessions idle beyond the TTL (frees their tracker state)."""
+        if not self._session_ttl:
+            return
+        now = time.time()
+        with self._sessions_lock:
+            stale = [(sid, now - k.last_used) for sid, k in self._sessions.items()
+                     if now - k.last_used > self._session_ttl]
+            for sid, idle in stale:
+                del self._sessions[sid]
+                logging.info("Reaped idle yolo session %s (idle %.0fs)", sid, idle)
+
+    def _get_session(self, sid):
+        """Fetch/create a session (tapnext semantics), bumping its clock."""
+        self._reap_idle_sessions()
+        with self._sessions_lock:
+            sess = self._sessions.get(sid)
+            if sess is None:
+                sess = _Session()
+                self._sessions[sid] = sess
+                logging.info("YOLO session created: %s (active: %d)",
+                             sid, len(self._sessions))
+            sess.last_used = time.time()
+            return sess
+
+    def _reset_session(self, sess):
+        """Clear ONE session's tracking state (tapnext semantics).
+
+        When it is the only live session the tracker's *global* id counter is
+        rewound too (tracker.reset()), so the next session starts IDs from
+        the base.  With other sessions live we only drop *this* tracker
+        (a fresh one continues the counter) — rewinding a shared counter
+        could otherwise collide with another session's live ids.
+        """
+        with self._sessions_lock:
+            alone = len(self._sessions) <= 1
+        tr = sess.tracker
+        if tr is not None:
+            if alone:
+                try:
+                    tr.reset()          # clears tracks AND rewinds the id counter
+                except Exception:
+                    logging.exception("tracker reset failed; dropping it instead")
+        sess.tracker = None             # next call adopts a fresh tracker
+        sess.frames = 0
+
+    def _attach_tracker(self, predictor, sess):
+        """Give ``predictor`` the session's tracker for the upcoming track()
+        call (new session: none, so ultralytics creates one we then adopt)."""
+        if sess.tracker is None:
+            if predictor is not None and hasattr(predictor, "trackers"):
+                try:
+                    del predictor.trackers
+                except AttributeError:
+                    pass
+            return
+        if predictor is not None:
+            predictor.trackers = [sess.tracker]
+            # Replicate ultralytics' fresh-creation setup once per predictor
+            # (it is skipped when on_predict_start early-returns on reuse).
+            if id(predictor) not in self._tracker_setups:
+                try:
+                    setter = getattr(type(sess.tracker), "setup_predictor", None)
+                    if setter is not None:
+                        setter(predictor)
+                    self._tracker_setups.add(id(predictor))
+                except Exception:
+                    logging.exception("tracker setup_predictor failed")
+
+    def _track_frames(self, frames, spec, sess, device):
+        """One tracking pass over ``frames`` (in order; per-frame Results).
+
+        Ultralytics forces batch=1 in track mode, so every frame is one
+        sequential forward + one tracker.update — the tracker state (owned
+        by ``sess``) carries the track ids across frames AND across calls.
+        """
+        with self._track_lock:
+            predictor = self._model.predictor
+            self._attach_tracker(predictor, sess)
+            if os.getenv("YOLO_DBG"):
+                logging.info("DBG-ATTACH pct=%s sess=%s tracker=%s n_ses=%d",
+                             id(predictor), sess, id(sess.tracker), len(self._sessions))
+
+            results = self._model.track(
+                frames,
+                persist=True,          # reuse the attached tracker, never re-create
+                conf=spec["conf"],
+                iou=spec["iou"],
+                imgsz=spec["imgsz"],
+                max_det=spec["max_det"],
+                classes=spec["classes"],
+                device=device,
+                verbose=False,
+            )
+
+            # Adopt the tracker this call actually used: a fresh one for a
+            # new session, or the surviving one if the model swapped a
+            # predictor under us (first GPU call / weights switch).
+            live = self._model.predictor
+            live_trackers = getattr(live, "trackers", None) if live is not None else None
+            if live_trackers:
+                sess.tracker = live_trackers[0]
+            if os.getenv("YOLO_DBG"):
+                logging.info("DBG-ADOPT live=%s live_is_same=%s live_trackers=%s sess_trk=%s",
+                             id(live), live is predictor,
+                             [id(t) for t in (live_trackers or [])], id(sess.tracker))
+            return results
 
     # ---------------------------------------------------------------- params
     @staticmethod
@@ -216,7 +378,6 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 parameters.get("save_annotated", _DEFAULTS["save_annotated"]), "save_annotated"),
             "frame_step": max(1, int(self._num(parameters, "frame_step", int))),
             "max_frames": max(1, int(self._num(parameters, "max_frames", int))),
-            "batch": max(1, int(self._num(parameters, "batch", int))),
         }
 
     # ---------------------------------------------------------------- inputs
@@ -394,8 +555,12 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
 
     # -------------------------------------------------------------- inference
     def _detect_frame(self, r, frame, frame_index):
-        """One frame's Result -> a plain-JSON detection record."""
-        xyxy = labels = class_ids = scores = []
+        """One frame's Result -> a plain-JSON detection record.
+
+        The box always runs in track mode, so ``boxes`` carries ``.id``
+        (per-session tracker ids); a frame with zero boxes has an empty
+        box list and ``track_id: null``."""
+        xyxy = labels = class_ids = scores = track_ids = []
         boxes = getattr(r, "boxes", None)
         if boxes is not None and len(boxes):
             names = self._model.names
@@ -403,6 +568,8 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
             class_ids = boxes.cls.cpu().numpy().astype(int).tolist()
             labels = [names[c] for c in class_ids]
             scores = np.round(boxes.conf.cpu().numpy(), 4).tolist()
+            if getattr(boxes, "id", None) is not None:
+                track_ids = [int(t) for t in boxes.id.cpu().numpy().tolist()]
         h, w = frame.shape[:2]
         return {
             "frame_index": frame_index,   # original index in the source (video frame nº / list pos)
@@ -412,6 +579,7 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
             "class_ids": class_ids,
             "labels": labels,
             "scores": scores,
+            "track_id": track_ids if track_ids else None,   # per-box session tracker id
         }
 
     # ---------------------------------------------------------------- Process
@@ -430,10 +598,35 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
             if not isinstance(parameters, dict):
                 return _error("parameters must be an object")
 
-            # Stateless box: accept "reset" (client convenience) as a no-op.
+            # Multi-session (tapnext contract): session_id at the section
+            # top level; omitted -> the shared "default" session.
+            sid = str(yolo_config.get("session_id") or _DEFAULT_SESSION)
+
+            # Reset is scoped to THIS session — other sessions untouched.
             if yolo_config.get("command") == "reset" or parameters.get("reset"):
+                sess = self._get_session(sid)
+                self._reset_session(sess)
                 return pipeline_pb2.Envelope(
-                    config_json=json.dumps({"yolo": {"status": "done", "action": "reset"}}))
+                    config_json=json.dumps(
+                        {"yolo": {"status": "done", "action": "reset", "session": sid}}))
+
+            if yolo_config.get("command") == "list":
+                # Operator view: active sessions only (no state content).
+                with self._sessions_lock:
+                    now = time.time()
+                    listing = [
+                        {
+                            "session": k,
+                            "frames_processed": s.frames,
+                            "has_tracker": s.tracker is not None,
+                            "idle_seconds": round(now - s.last_used, 1),
+                        }
+                        for k, s in self._sessions.items()
+                    ]
+                return pipeline_pb2.Envelope(
+                    config_json=json.dumps(
+                        {"yolo": {"status": "done", "action": "list",
+                                  "sessions": listing}}))
 
             try:
                 spec = self._parse_parameters(parameters)
@@ -449,10 +642,13 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 return _error("send either data.images or data.video, not both")
             if not image_bytes_list and not video_bytes:
                 return pipeline_pb2.Envelope(
-                    config_json=json.dumps({"yolo": {"status": "empty_request"}}))
+                    config_json=json.dumps(
+                        {"yolo": {"status": "empty_request", "session": sid}}))
 
             # Weights: resolved per call — explicit parameters.weights or
-            # the startup default (stateless box: no sticky state). Fresh
+            # the startup default.  A weights switch swaps the YOLO model;
+            # session trackers attach to whichever predictor serves the
+            # next call (they outlive the model instance).  Fresh
             # checkpoints download on first use.
             weights = str(parameters.get("weights") or "").strip() \
                 or self._default_weights
@@ -483,34 +679,23 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 frames = self._decode_images(image_bytes_list)
                 frame_indices = list(range(len(frames)))
 
-            # Chunked inference: the ultralytics *list* path runs the whole list
-            # as ONE batch in a single forward pass (LoadPilAndNumpy yields it
-            # once; preprocess np.stacks it all to the GPU), so the VRAM peak
-            # would scale with len(frames) × imgsz².  Bounding each forward
-            # pass to spec["batch"] frames (default 16, ultralytics' own video
-            # default) keeps the spike constant regardless of max_frames.  
-            # Detection is strictly per-frame (no cross-frame state), so the
-            # chunked results are identical — order is preserved by extending.
-            results = []
-            for i in range(0, len(frames), spec["batch"]):
-                chunk = frames[i:i + spec["batch"]]
-                results.extend(self._model(
-                    chunk,
-                    conf=spec["conf"],
-                    iou=spec["iou"],
-                    imgsz=spec["imgsz"],
-                    max_det=spec["max_det"],
-                    classes=spec["classes"],
-                    device=device,
-                    verbose=False,
-                ))
-            if len(results) != len(frames):
-                return _error(f"inference returned {len(results)} results for "
+            # Tracking pass: every call runs track mode (track ids are a
+            # byproduct of detection, not a separate mode).  Ultralytics does
+            # the frames sequentially (it forces batch=1 in track mode) and
+            # advances the session's tracker over them, so VRAM stays bounded
+            # per frame and ids stay stable across calls in this session.
+            sess = self._get_session(sid)
+            results = self._track_frames(frames, spec, sess, device)
+            if not isinstance(results, list) or len(results) != len(frames):
+                n = len(results) if isinstance(results, list) else type(results).__name__
+                return _error(f"tracking returned {n} results for "
                               f"{len(frames)} frames (internal error)")
 
             detections = [self._detect_frame(results[i], frames[i], frame_indices[i])
                           for i in range(len(frames))]
             num_detections = sum(len(d["boxes"]) for d in detections)
+            num_tracks = len({t for d in detections for t in (d["track_id"] or [])})
+            sess.frames += len(frames)
 
             response_data = {
                 "detections": wrap_value(json.dumps(detections).encode("utf-8")),
@@ -551,8 +736,11 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                     "box": "yolo",
                     "weights": self._current_weights,
                     "source": source,
+                    "session_id": sid,
+                    "tracked": True,
                     "num_frames": len(frames),
                     "num_detections": num_detections,
+                    "num_tracks": num_tracks,
                     "runtime_seconds": round(time.time() - start_time, 3),
                     "parameters": {k: v for k, v in parameters.items()
                                    if k not in ("images", "video")},
@@ -571,12 +759,15 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 config_json=json.dumps({
                     "yolo": {
                         "status": "done",
+                        "session": sid,
                         "weights": self._current_weights,
                         "runtime": time.time() - start_time,
                         "source": source,
                         "num_frames": len(frames),
                         "frames_sampled": len(frames),
                         "num_detections": num_detections,
+                        "tracked": True,
+                        "num_tracks": num_tracks,
                         # Declared payload encoding (generic boxes_client
                         # contract): JSON detection records, raw JPEG bytes.
                         "encoding": encoding,

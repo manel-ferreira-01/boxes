@@ -43,4 +43,4 @@ docker compose down           # stop
 | opencv      | 9065      | `opencv`       | feature matching (Process), similarity (similarity_check) |
 | vggt        | 9066      | `vggt`         | 3D reconstruction (points/depth/cameras + GLB) — heavy image, ~12 GB pull |
 | moge        | 9067      | `moge`         | MoGe-3 single-view geometry (metric depth/points/normals) — CUDA-only |
-| yolo        | 9068      | `yolo`         | YOLO object detection on images and/or a decoded video (ultralytics) |
+| yolo        | 9068      | `yolo`         | YOLO detection **+ tracking** on images and/or a decoded video (ultralytics; per-session track ids — `session_id`/`reset`/`list` like tapnext) |

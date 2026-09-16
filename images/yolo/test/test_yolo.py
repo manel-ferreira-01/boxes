@@ -8,10 +8,13 @@ Connects to a running yolo box and:
   3. decodes the declared-``json`` ``detections`` field and prints, per
      frame, the detection count and each box/label/score
   4. checks the ``annotated`` JPEG frames (magic + count)
-  5. optionally, if a video is available (``YOLO_TEST_VIDEO`` env var, or
+  5. exercises the tapnext-style multi-session tracking contract
+     (``track_id`` per box, stable within a session, independent across
+     sessions, ``reset`` scoped to the session, ``list``)
+  6. optionally, if a video is available (``YOLO_TEST_VIDEO`` env var, or
      the repo's ``cozinha.mp4`` at the repo root), runs the same tour on
      the video input with frame sampling
-  6. optionally, if ``YOLO_TEST_WEIGHTS`` names a fetchable checkpoint,
+  7. optionally, if ``YOLO_TEST_WEIGHTS`` names a fetchable checkpoint,
      exercises the ``parameters.weights`` switch (and the switch back)
 
 Mirrors the style of images/clip/test/test_clip.py.
@@ -69,7 +72,9 @@ def print_detections(detections):
     for d in detections:
         n = len(d["boxes"])
         total += n
-        print(f"  frame {d['frame_index']:>3d} ({d['width']}x{d['height']}): {n} detection(s)")
+        tid = d.get("track_id")
+        print(f"  frame {d['frame_index']:>3d} ({d['width']}x{d['height']}): {n} detection(s)"
+              + (f"  track_ids={tid}" if tid else ""))
         for box, label, cid, score in zip(d["boxes"], d["labels"], d["class_ids"], d["scores"]):
             print(f"      {label:>10s} (class {cid})  score={score:.4f}  xyxy=[{box[0]:.1f}, {box[1]:.1f}, {box[2]:.1f}, {box[3]:.1f}]")
     return total
@@ -115,7 +120,8 @@ def main():
             failures.append("detections shape")
         else:
             for d in detections:
-                for key in ("frame_index", "width", "height", "boxes", "labels", "class_ids", "scores"):
+                for key in ("frame_index", "width", "height", "boxes", "labels",
+                            "class_ids", "scores", "track_id"):
                     if key not in d:
                         print(f"  detection record missing key {key!r}")
                         failures.append(f"record key {key}")
@@ -141,17 +147,106 @@ def main():
         failures.append("annotated missing")
 
     # ------------------------------------------------------------------ #
-    # Case 2: reset (stateless no-op)                                     #
+    # Case 2: reset (scoped to the calling session)                       #
     # ------------------------------------------------------------------ #
-    print("\n== case 2: reset (stateless no-op) ==")
+    print("\n== case 2: reset (scoped to session) ==")
     response = stub.Process(pipeline_pb2.Envelope(
-        config_json=json.dumps({"yolo": {"command": "reset"}})))
+        config_json=json.dumps({"yolo": {"command": "reset", "session_id": "case2"}})))
     section = check_status(response)
     if section is None:
         return 1
-    print(f"  action: {section.get('action')}")
+    print(f"  action: {section.get('action')}  session: {section.get('session')}")
     if section.get("action") != "reset":
         failures.append("reset action")
+    if section.get("session") != "case2":
+        failures.append("reset session echo")
+
+    # ------------------------------------------------------------------ #
+    # Case 2b: multi-session tracking (tapnext-style contract)            #
+    # ------------------------------------------------------------------ #
+    print("\n== case 2b: multi-session tracking (track_id) ==")
+    dog = image_bytes_list[0]  # dog.jpg — reliably has a COCO object
+
+    def call_session(sid):
+        resp = stub.Process(pipeline_pb2.Envelope(
+            config_json=json.dumps({
+                "yolo": {
+                    "command": "detect",
+                    "session_id": sid,
+                    "parameters": {"conf": 0.25, "save_annotated": False},
+                }
+            }),
+            data={"images": aux.wrap_value([dog])},
+        ))
+        sec = check_status(resp)
+        if sec is None:
+            return None
+        dets = json.loads(bytes(aux.unwrap_value(resp.data["detections"])).decode("utf-8"))
+        return sec, dets
+
+    ids = {}
+    out_a1 = call_session("t-a")
+    out_a2 = call_session("t-a")   # same session again: ids must be stable
+    out_b = call_session("t-b")    # different session: independent sequence
+    for label, out in (("a1", out_a1), ("a2", out_a2), ("b", out_b)):
+        if out is None:
+            failures.append(f"session call {label}")
+            continue
+        sec, dets = out
+        if sec.get("session") != ("t-a" if label.startswith("a") else "t-b"):
+            failures.append(f"session echo {label}")
+        box_ids = dets[0].get("track_id")
+        if dets[0]["boxes"] and (not isinstance(box_ids, list)
+                                 or len(box_ids) != len(dets[0]["boxes"])
+                                 or not all(isinstance(t, int) for t in box_ids)):
+            failures.append(f"track_id shape {label}: {box_ids!r}")
+        ids[label] = box_ids
+
+    if ids.get("a1") and ids.get("a2"):
+        if ids["a1"] == ids["a2"]:
+            print(f"  stable ids across calls in t-a: {ids['a1']}")
+        else:
+            print(f"  UNSTABLE ids: a1={ids['a1']} a2={ids['a2']}")
+            failures.append("session id stability")
+
+    if ids.get("a1") and ids.get("b") and ids["a1"] != ids["b"]:
+        print(f"  independent sequences: t-a={ids['a1']} t-b={ids['b']}")
+
+    # reset scoped to t-a only; t-b is untouched
+    response = stub.Process(pipeline_pb2.Envelope(
+        config_json=json.dumps({"yolo": {"command": "reset", "session_id": "t-a"}})))
+    section = check_status(response)
+    if section is None or section.get("session") != "t-a":
+        failures.append("scoped reset t-a")
+    out_a3 = call_session("t-a")
+    if out_a3:
+        box_ids3 = out_a3[1][0].get("track_id")
+        print(f"  t-a after reset: ids={box_ids3} (fresh tracker, new numbering)")
+        if out_a3[1][0]["boxes"] and not box_ids3:
+            failures.append("post-reset track ids")
+        # t-b must still hold its id from before (scoped reset left it alone)
+        out_b2 = call_session("t-b")
+        if out_b2 and ids.get("b") and out_b2[1][0].get("track_id") == ids["b"]:
+            print(f"  t-b untouched by t-a's reset: ids still {ids['b']}")
+        elif out_b2 and ids.get("b"):
+            print(f"  t-b RE-NUMBERED after t-a reset: {ids['b']} -> {out_b2[1][0].get('track_id')}")
+            failures.append("scoped reset leaked to t-b")
+
+    # list: active sessions, no state content
+    response = stub.Process(pipeline_pb2.Envelope(
+        config_json=json.dumps({"yolo": {"command": "list"}})))
+    section = check_status(response)
+    if section is None:
+        failures.append("list")
+    else:
+        names = {s.get("session") for s in section.get("sessions", [])}
+        print(f"  list: {sorted(names)}")
+        if not {"t-a", "t-b"}.issubset(names):
+            failures.append(f"list missing sessions: {names}")
+        for s in section.get("sessions", []):
+            for key in ("session", "frames_processed", "has_tracker", "idle_seconds"):
+                if key not in s:
+                    failures.append(f"list entry key {key}")
 
     # ------------------------------------------------------------------ #
     # Case 3: video (optional — needs a real video file)                  #

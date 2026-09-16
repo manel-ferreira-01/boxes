@@ -1,8 +1,9 @@
-# YOLO Box (object detection on images and videos)
+# YOLO Box (object detection **and tracking** on images and videos)
 
 A gRPC box that runs YOLO object detection (ultralytics) over **images and
-videos** and returns per-frame detection records plus optionally annotated
-frames.
+videos** — **always in tracking mode, so every detection also carries a
+stable per-session track id** — and returns per-frame detection records plus
+optionally annotated frames (annotated with id labels).
 
 The box speaks the shared **envelope** interface, so it is addressable
 through `boxes_client` exactly like clip:
@@ -13,9 +14,15 @@ service PipelineService {
 }
 ```
 
-It is **stateless**: one call = one detection pass over every frame you
-send (images and/or one decoded video). `reset` is accepted as a no-op so
-`boxes_client`'s `reset_first` stays safe.
+It follows the **tapnext multi-session contract**: the tracker state (object
+identities + id counter) lives per `session_id`, so one call runs detection
++ tracking over the frames you send, and *the same session* keeps stable
+track ids across calls while *different sessions* get independent id
+sequences. `reset` clears **this session's** tracker (other sessions are
+untouched), `list` gives the operator the active sessions, and idle sessions
+are reaped after `YOLO_SESSION_TTL` seconds (default 1800; `0` keeps them
+forever). Sessions live on the **box**, not in the image bytes — a box
+restart starts all of them fresh.
 
 ## Directory structure
 
@@ -67,8 +74,12 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
 - `data["video"]` — a single video file (mp4/avi/webm/mov). The box decodes
   it server-side (OpenCV/ffmpeg), samples every `frame_step`-th frame, and
   stops at `max_frames` sampled frames.
-- `config["yolo"]["command"]` — `"detect"` (default) or `"reset"` (no-op,
-  the box is stateless).
+- `config["yolo"]["command"]` — `"detect"` (default; tracking is always on),
+  `"reset"` (clear this session's tracker state), or `"list"` (active
+  sessions — no `data` needed).
+- `config["yolo"]["session_id"]` — opaque session key (section top level,
+  like tapnext). Omitted → the shared `"default"` session. Same session =
+  stable track ids across calls; different sessions = independent sequences.
 - `config["yolo"]["parameters"]` — the knobs:
 
 | key               | default | meaning                                                        |
@@ -83,7 +94,6 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
 | `save_annotated`  | `true`  | also return the annotated frames as JPEGs                       |
 | `frame_step`      | `1`     | video only: sample every Nth frame                              |
 | `max_frames`      | `1024`  | safety cap on sampled frames per call                           |
-| `batch`           | `16`    | max frames per GPU forward pass — inference is chunked at this size, so the VRAM spike is bounded by `batch × imgsz²` instead of `N × imgsz²` (detection is per-frame: results are identical) |
 
 ### Response
 
@@ -93,17 +103,29 @@ Up to two fields in `data` (send **either**, not both), and a small `config`:
 {
   "yolo": {
     "status": "done",
+    "session": "default",          // or the session_id you sent
     "weights": "yolov8n.pt",
     "runtime": 4.21,
     "source": "images",            // or "video"
     "num_frames": 2,
     "frames_sampled": 2,
     "num_detections": 3,
+    "tracked": true,               // every call tracks; ids are per-session
+    "num_tracks": 1,               // unique track ids in this call
     "frames_in_video": 211,        // video only: total (container metadata; fallback: decoded)
     "frame_step": 30,              // video only
     "encoding": { "detections": "json", "annotated": "identity" }
   }
 }
+```
+
+`reset` / `list` respond in the same shape as tapnext:
+
+```json
+{ "yolo": { "status": "done", "action": "reset", "session": "ses_abc" } }
+{ "yolo": { "status": "done", "action": "list",
+            "sessions": [ { "session": "default", "frames_processed": 2,
+                            "has_tracker": true, "idle_seconds": 42.0 } ] } }
 ```
 
 and `data` carries:
@@ -124,14 +146,19 @@ A detection record (plain JSON):
   "boxes":       [[x1, y1, x2, y2], ...],   // xyxy in input-frame pixels
   "class_ids":   [49, ...],
   "labels":      ["orange", ...],
-  "scores":      [0.65, ...]
+  "scores":      [0.65, ...],
+  "track_id":    [3, ...]                   // per-box tracker id in THIS session (null when the frame has no boxes)
 }
 ```
 
 `frame_index` is the frame's original index in the source (its position in
 `images`, or the video frame number when sampling a video). `boxes` are
 axis-aligned `xyxy` rectangles in the **original frame's** pixel
-coordinates (rounded to 2 decimals).
+coordinates (rounded to 2 decimals). `track_id` is aligned with `boxes`
+(same order/length): the same object keeps the same id within a session
+across frames *and* across calls — that's what makes a video's detections
+joinable into trajectories. A fresh session (or after `reset`) starts
+numbering from the base.
 
 ## Call with boxes_client
 

@@ -108,14 +108,18 @@ def test_moge_maps_are_visualized_per_item(reg):
 def test_yolo_detection_def(reg):
     d = reg.get("yolo")
     assert d.box_key == "yolo"
-    assert set(d.command.values) == {"detect", "reset"}
+    assert set(d.command.values) == {"detect", "reset", "list"}
     assert d.command.default == "detect"
     assert {f.field for f in d.inputs} == {"images", "video"}
     params = {p.key for p in d.parameters}
-    assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames", "batch"} == params
-    # chunked inference bound: VRAM peak scales with batch, not with N frames
-    batch = next(p for p in d.parameters if p.key == "batch")
-    assert batch.widget == "number" and batch.default == 16
+    # tracking is always on (no batch knob: track mode runs batch=1 per frame)
+    assert params == {"weights", "conf", "iou", "imgsz", "classes",
+                      "save_annotated", "frame_step", "max_frames"}
+    # multi-session like tapnext: per-session tracker state + scoped actions
+    assert d.session is not None
+    assert d.session.key == "session_id"
+    assert d.session.auto_generate is True
+    assert set(d.session.actions) == {"reset", "list"}
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
     # panel order: annotated video (video input) -> annotated grid (image
     # input only: renders when annotated_video is absent) -> zip download -> table

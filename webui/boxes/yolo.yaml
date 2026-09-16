@@ -1,17 +1,20 @@
-# YOLO box — stateless object detection on images and videos.
+# YOLO box — object detection AND tracking on images and videos.
 # Authoritative request shape: ../../images/yolo/README.md
 id: yolo
-name: "YOLO · object detection (images & video)"
+name: "YOLO · detection + tracking (images & video)"
 box_key: yolo
 input_mosaic: false   # redundant: the annotated result IS the input (with boxes)
 docs: ../../images/yolo/README.md
 note: >
-  Stateless: one call detects over every frame you send. Send image files
-  (or a video — frames are extracted in your browser) for client-side frame
-  delivery, or upload a raw video file and the box decodes it server-side.
-  Image input → the panel leads with the annotated **grid** + detections
-  table; video input → the annotated **video** is the view (the per-frame
-  JPEG grid then stays in the artifacts list / raw JSON).
+  Tracking is always on: every detection carries a stable track id for
+  THIS console's session (the table has a track_id column, the annotated
+  frames are labelled with ids). One call tracks over every frame you
+  send. Send image files (or a video — frames are extracted in your
+  browser) for client-side frame delivery, or upload a raw video file and
+  the box decodes it server-side. Image input → the panel leads with the
+  annotated **grid** + detections table; video input → the annotated
+  **video** is the view (the per-frame JPEG grid then stays in the
+  artifacts list / raw JSON).
 
 inputs:
   - field: images
@@ -32,7 +35,9 @@ inputs:
       (see frame_step / max_frames). Send either this or images, not both.
 
 command:
-  values: [detect, reset]
+  # tracking is always on (ids follow the session), so "detect" carries the
+  # track ids too; "list" is the session-action view (see session.actions)
+  values: [detect, reset, list]
   default: detect
 
 parameters:
@@ -73,10 +78,16 @@ parameters:
     widget: number
     default: 128
     placeholder: "video: safety cap on decoded frames"
-  - key: batch
-    widget: number
-    default: 16
-    placeholder: "max frames per GPU forward pass — bounds the VRAM spike (detection is per-frame, results identical)"
+
+session:
+  key: session_id
+  auto_generate: true
+  actions: [reset, list]
+  note: >
+    Per-session tracker state (tapnext contract): track ids stay stable
+    across calls in this session only. A fresh ID is generated on every
+    page load; "reset" clears this session's tracker (track ids restart),
+    "list" shows the box's active sessions.
 
 results:
   # Video input: one annotated mp4 (source fps, H.264) is the view.
@@ -98,7 +109,7 @@ results:
       filename: "yolo-annotations.zip"
   - field: detections
     visualizer: table
-    caption: "per-frame detections (boxes xyxy, class id, label, score)"
+    caption: "per-frame detections (boxes xyxy, class id, label, score, track id)"
     params:
       filename: "yolo-detections.json"
   - field: "*"

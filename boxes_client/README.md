@@ -180,7 +180,7 @@ reinterpret any 4-byte-aligned blob); boxes are expected to declare.
 | Box | In scope | Notes |
 |-----|----------|-------|
 | tapnext (`Process`) | ✅ | v1 target; `trace(box, ...)` convenience over `Box.run` |
-| vggt, moege_box, clip, lang_segm, **yolo** (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; `yolo` dispatches `detect`/`track`/`reset` commands and declares per-field `encoding` (`images` identity, `detections` json) |
+| vggt, moege_box, clip, lang_segm, **yolo** (`Process`) | ✅ envelope shape | call via `Box.run(...)` with the box-specific `config`; `yolo` always tracks (per-session `track_id` in `detections`; `session_id`/`reset`/`list` like tapnext) and declares per-field `encoding` (`detections` json, `annotated` identity) |
 | opencv_box (`Process` + `similarity_check`) | ✅ partial | the shared `Process` call works; the extra `similarity_check` RPC still needs the box's own proto for `method=` |
 | cotracker (`Forward`) | ⏸ pending | use `Box.run` after it's migrated to the shared envelope (client needs no changes) |
 
