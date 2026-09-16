@@ -51,6 +51,7 @@ def test_clip(reg):
     assert d.box_key == "clip"
     assert d.command.default == "encode"
     assert {f.field for f in d.inputs} == {"images", "texts"}
+    assert d.input_mosaic is True   # default: the "inputs" mosaic still shows
     assert any(p.key == "model" for p in d.parameters)
 
 
@@ -113,10 +114,14 @@ def test_yolo_detection_def(reg):
     params = {p.key for p in d.parameters}
     assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
-    # the panel is video + detections table; per-frame JPEGs have no
-    # dedicated block (they fall to the `*` wildcard / artifacts list)
-    assert viz == {"annotated_video": "video", "detections": "table"}
+    # panel order: annotated video (video input) -> annotated grid (image
+    # input only: renders when annotated_video is absent) -> detections table
+    assert viz == {"annotated_video": "video", "annotated": "image_grid", "detections": "table"}
     assert [r.field for r in d.results if r.field != "*"][0] == "annotated_video"
+    grid = next(r for r in d.results if r.field == "annotated")
+    assert grid.visualizer == "image_grid"
+    assert grid.only_if_missing == "annotated_video"   # hidden for video input
+    assert d.input_mosaic is False   # annotated result already shows the input
     assert d.results[-1].field == "*"
 
 

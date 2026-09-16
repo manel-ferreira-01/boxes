@@ -58,6 +58,7 @@ export interface ResultDef {
   visualizer: string;
   caption?: string | null;
   base?: string | null;
+  only_if_missing?: string | null;
   layers: LayerDef[];
   inputs: Record<string, string>;
   note?: string | null;
@@ -73,6 +74,7 @@ export interface BoxDef {
   docs?: string | null;
   note?: string | null;
   experimental: boolean;
+  input_mosaic?: boolean;
   inputs: InputField[];
   actions: ActionDef[];
   command: CommandSpec | null;

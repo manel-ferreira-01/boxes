@@ -124,12 +124,23 @@ Def-driven extras (generic, no box names in code):
   parameter is **omitted** from the wire (the box's auto/default applies).
   Don't fake an auto mode by sending a magic value — the box treats a
   missing key as *use the default*.
+* **Conditional result block** — `only_if_missing: <field>` on a result def
+  renders that block **only when the named field is absent from the response**
+  (preferred-field fallback, generic: no box names in code). Used by yolo: the
+  per-frame `annotated` grid shows only when the box returned no
+  `annotated_video` (i.e. image input) — for video input the mp4 stays the
+  view and the JPEGs surface via the artifacts list.
+* **`input_mosaic: false`** (box def, default `true`) — hides the console's
+  "inputs · N images uploaded" mosaic. For defs whose result already shows the
+  input, that block is pure duplication: yolo sets it (`annotated` frames are
+  the input with boxes drawn); other boxes keep the mosaic, which is the
+  only place the sent frames (e.g. `video_frames` extraction) are visible.
 * **`video` result def** — a video file artifact (`video/mp4`/…) plays in a
   native `<video controls>` player (no codec work: the browser does it).
   Used by yolo: a video in → `annotated_video` out — the same annotated
-  frames the box also returns as per-frame `annotated` JPEGs (which have no
-  inline panel block — the video is the view; the JPEGs stay downloadable via
-  the artifacts list), re-encoded as one mp4 at the source video's fps. The box encodes **H.264** (PyAV bundles FFmpeg incl.
+  frames the box also returns as per-frame `annotated` JPEGs (see the
+  conditional block above), re-encoded as one mp4 at the source video's fps.
+  The box encodes **H.264** (PyAV bundles FFmpeg incl.
   libx264) because browsers can't decode `mp4v`; `/api/file` honours
   `Range`/`206` so the player's seeks don't re-download the clip.
 * **`points` result def** — per-item point cloud, orbit/zoom, rendered
@@ -175,6 +186,12 @@ Def-driven extras (generic, no box names in code):
   the old JS bundle.
 * `tapnext` wants `data.images` as a **list** (even single frame) — the box
   checks `isinstance`.
+* **Grid blowout** — the console's `.grid-2` (form | results) must keep
+  `.grid-2 > * { min-width: 0 }`: a `1fr` track never shrinks below an item's
+  min-content, and the results table (`nowrap` cells) has a min-content wider
+  than the viewport. Without that, the *page* scrolls horizontally; with it,
+  the table scrolls inside its own `.tablewrap`. Table cells stay unbroken —
+  `overflow-wrap: anywhere` is explicitly excluded for `table.data`
 * First GPU call on a box takes a few seconds (CPU→GPU model migration);
   the API `timeout` (s) is honored per call.
 * tapnext sessions live server-side and are reaped after

@@ -170,6 +170,9 @@ class ResultDef(_Def):
     visualizer: str
     caption: Optional[str] = None
     base: Optional[str] = None               # input field with base images (overlay base, points colors)
+    only_if_missing: Optional[str] = None    # render only when <field> is NOT in the response
+                                              # (preferred-field fallback, e.g. annotated grid
+                                              # only when the box returned no annotated_video)
     layers: list[LayerDef] = Field(default_factory=list)
     inputs: dict[str, str] = Field(default_factory=dict)  # e.g. {frame: images, tracks: tracks}
     note: Optional[str] = None
@@ -210,6 +213,9 @@ class BoxDef(_Def):
     docs: Optional[str] = None
     note: Optional[str] = None
     experimental: bool = False
+    input_mosaic: bool = True              # hide the "inputs" image mosaic when the
+                                           # result already shows the input (e.g. yolo's
+                                           # annotated frames = input + boxes)
 
     inputs: list[InputField] = Field(default_factory=list)
     actions: list[ActionDef] = Field(default_factory=list)

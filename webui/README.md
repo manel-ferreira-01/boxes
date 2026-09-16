@@ -210,5 +210,6 @@ in-memory by design; `fleet.json` is the only durable state.
    (needs a live vggt box), side-by-side prompts on lang_sam
 5. **done** — standard `yolo` box (image + video detection) added to the webui
    via [`boxes/yolo.yaml`](boxes/yolo.yaml) → `video` (annotated_video) +
-   `table` (per-frame detections); the panel has no JPEG grid — per-frame
-   annotated JPEGs surface via the artifacts list
+   `image_grid` (annotated, image input only — gated by `only_if_missing:`)
+   + `table` (per-frame detections); for video input the mp4 is the view and the
+   per-frame JPEGs surface via the artifacts list

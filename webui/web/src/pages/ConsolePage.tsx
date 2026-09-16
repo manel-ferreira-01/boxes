@@ -540,8 +540,13 @@ function ResultView({
       ? res.declared_encoding
       : Object.entries(res.declared_encoding).map(([k, v]) => `${k}:${v}`).join(" "));
 
-  // def-driven visualizers: concrete first, "*" is the fallback renderer
-  const concrete = def.results.filter((r) => r.field !== "*");
+  // def-driven visualizers: concrete first, "*" is the fallback renderer.
+  // A block with ``only_if_missing: X`` renders only when X is absent from
+  // the response (preferred-field fallback — e.g. yolo's annotated grid
+  // shows only when the box returned no annotated_video).
+  const fields = res.fields ?? {};
+  const concrete = def.results.filter((r) => r.field !== "*"
+    && !(r.only_if_missing && r.only_if_missing in fields));
   const covered = new Set(concrete.map((r) => r.field));
   const wildcard = def.results.find((r) => r.field === "*");
   const uncovered = Object.keys(res.fields || {});
@@ -571,8 +576,9 @@ function ResultView({
           </div>
         )}
 
-        {/* input mosaic: what went in (images) */}
-        {current && current.images.length > 0 && (
+        {/* input mosaic: what went in (images) — defs whose results already
+            show the input (yolo's annotated frames) set input_mosaic: false */}
+        {def.input_mosaic !== false && current && current.images.length > 0 && (
           <div className="viz">
             <div className="viz-caption">inputs · {current.images.length} image{current.images.length > 1 ? "s" : ""} uploaded</div>
             <ImageGrid value={current.images.map(fileUrl)} />
