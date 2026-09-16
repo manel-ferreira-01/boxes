@@ -1,6 +1,6 @@
 # boxes-webui
 
-> **Status: current** — backend (51 tests, live-verified) and the
+> **Status: current** — backend (52 tests, live-verified) and the
 > SPA (`web/`: fleet page, def-driven console, all 11 visualizers) are built,
 > and a session of fixes landed: tab-state isolation, video input for
 > tapnext, per-frame track visibility, labeled heatmaps, input mosaic.
@@ -15,7 +15,7 @@ YAML box definitions, HTTP API, and `boxes_client` under the hood.
    browser / curl ──HTTP──▶ webui (FastAPI, core/*, boxes_agnostic)
                                   │
                                   ▼  boxes_client.Box.run(...)
-   box by IP:port (Process Envelope) ── clip · tapnext · lang_sam · sbert · vggt
+   box by IP:port (Process Envelope) ── clip · tapnext · lang_sam · sbert · vggt · yolo
 ```
 
 **Design rule (inherited from `boxes_client`):** the core is *smart about
@@ -32,15 +32,12 @@ so *adding a box = one YAML file*, never code.
 | lang_segm | ✅ | standard envelope |
 | textEmbedding (sbert) | ✅ | standard envelope |
 | vggt | ✅ | standard envelope (legacy flat config, supported via `flat_config`) |
-| **yologpt** | ✅ | standard envelope: `detect` (stateless) / `track` (stateful) / `reset` |
+| yolo | ✅ | standard envelope; detection over images and/or a decoded video |
 | **opencv_box** | ⏸ **skipped** | serves `similarity_check` as a second RPC |
 
 The skip is deliberate: the webui stays **contract-only** (one stub, `Process`,
-for every box). When that box migrates to the shared envelope
-(see the "Method dispatch caveat" in
-[`boxes_client/README.md`](../boxes_client/README.md)), drop its YAML
-definition into `boxes/` — no code changes needed (as `yolo.yaml` now does).
-Defs that request a
+for every box). When opencv_box migrates to the shared envelope, drop its YAML
+definition into `boxes/` — no code changes needed. Defs that request a
 non-`Process` `method` are refused with a clear error (`build_call`).
 
 ## Quick start
@@ -118,6 +115,9 @@ section), `declared_encoding` (the codec the box declared, verbatim),
 * the request is validated **against the box definition** — unknown
   parameters, section keys, data fields, commands, or actions are 400 with
   `known: [...]`;
+* `GET /api/file/{token}` honours **`Range` → `206 Partial Content`**
+  (`Accept-Ranges: bytes` is advertised), so HTML5 `<video>` seeks work
+  without re-downloading the artifact;
 * **reset semantics**: `command: reset` *is* the reset (no `reset_first`);
   stateful boxes (tapnext) are **never** auto-reset — that would kill a live
   sequence; stateless boxes get the client's safe no-op `reset_first`.
@@ -131,7 +131,7 @@ docstrings). Vocabulary:
 * **widgets** — `image_upload · video_frames · file_upload · tags ·
   text_repeat · slider · select · number · json`
 * **visualizers** — `json (fallback) · table · image_grid · overlay
-  (box/mask/point/flow layers) · matrix · tensor · field_map · glb · points
+  (box/mask/point/flow layers) · matrix · tensor · field_map · glb · video · points
   · tracks_player · download`
   (`points` renders point clouds straight from typed arrays with three.js
   `THREE.Points` — no GLB encoding; `glb` is for real glTF binaries like
@@ -155,7 +155,7 @@ to them, and `note:` fields record where the webui's view might lag.
 
 ```bash
 cd webui
-python -m pytest tests/ -q          # 51 tests: registry, caller (pure), API e2e
+python -m pytest tests/ -q          # 52 tests: registry, caller (pure), API e2e
 ```
 
 E2E tests spin up real fake boxes over gRPC (the `fake_box_smoke.py` pattern)
@@ -207,5 +207,8 @@ in-memory by design; `fleet.json` is the only durable state.
    (tapnext, steps assembled from call history), `matrix` (clip/sbert),
    `tensor`, `glb` (vggt, three.js) + `image_grid`/`table`/`json`/`download`
 4. **next** — polish: vggt camera auto-fit on a real reconstruction
-   (needs a live vggt box), side-by-side prompts on lang_sam, `image_grid`
-   for yologpt once it migrates to the envelope (out of scope)
+   (needs a live vggt box), side-by-side prompts on lang_sam
+5. **done** — standard `yolo` box (image + video detection) added to the webui
+   via [`boxes/yolo.yaml`](boxes/yolo.yaml) → `video` (annotated_video) +
+   `table` (per-frame detections); the panel has no JPEG grid — per-frame
+   annotated JPEGs surface via the artifacts list

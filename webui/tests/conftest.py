@@ -210,59 +210,88 @@ def fake_moge(std_pb):
 
 @pytest.fixture
 def fake_yolo(std_pb):
-    """Mimics the yologpt contract: images in; annotated JPEGs (identity)
-    + a flat JSON detections list (json codec) out, declared per-field
-    encoding in the response config. Stateful in track mode: track ids
-    accumulate across calls until a reset (the real box's contract)."""
+    """Mimics the yolo box contract: ``images`` (list) and/or a single
+    ``video`` (bytes) in; per-frame detection records as a JSON blob
+    (declared ``json``) + JPEG-annotated frames as a bytes list (declared
+    ``identity``) out.  Mirrors the real service's request validation
+    (reset / both / neither) and the ``frame_step`` video sampling."""
     pb2, pb2_grpc, aux = std_pb
 
-    class FakeYolo(pb2_grpc.PipelineServiceServicer):
-        def __init__(self):
-            super().__init__()
-            self._track_id = 0
-            self.seen_commands = []
+    ENCODING = {"detections": "json", "annotated": "identity"}
+    JPEG_MAGIC = b"\xff\xd8\xff\xe0"
+    # ftyp at offset 4 -> the serializer sniffs this as video/mp4
+    MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32
 
+    def jpeg(n: int) -> bytes:
+        return JPEG_MAGIC + f"fake-annotated-{n}".encode() + b"\x00" * 64
+
+    def record(frame_index: int, n: int) -> dict:
+        return {
+            "frame_index": frame_index,
+            "width": 64 + n * 8,
+            "height": 48,
+            "boxes": [[10.5, 20.25, 30.0, 40.0]],
+            "class_ids": [16],
+            "labels": ["dog"],
+            "scores": [0.91 - 0.01 * (n % 10)],
+        }
+
+    class FakeYolo(pb2_grpc.PipelineServiceServicer):
         def Process(self, request, context):
             cfg = json.loads(request.config_json) if request.config_json else {}
-            sc = cfg.get("yolo")
-            if sc is None:
-                return pb2.Envelope(config_json=json.dumps(
-                    {"yolo": {"status": "error", "error": "no yolo section"}}))
-            command = sc.get("command", "detect")
-            self.seen_commands.append(command)
-            if command == "reset":
-                self._track_id = 0
+            sc = cfg.get("yolo", {})
+            params = sc.get("parameters", {}) or {}
+            if sc.get("command") == "reset":
                 return pb2.Envelope(config_json=json.dumps(
                     {"yolo": {"status": "done", "action": "reset"}}))
-            imgs = list(aux.unwrap_value(request.data.get("images")) or [])
-            if not imgs:
+            imgs = aux.unwrap_value(request.data.get("images")) if "images" in request.data else None
+            video = aux.unwrap_value(request.data.get("video")) if "video" in request.data else None
+            if imgs and video:
+                return pb2.Envelope(config_json=json.dumps(
+                    {"yolo": {"status": "error",
+                              "error": "send either data.images or data.video, not both"}}))
+            if not imgs and not video:
                 return pb2.Envelope(config_json=json.dumps(
                     {"yolo": {"status": "empty_request"}}))
 
-            dets = []
-            for i in range(len(imgs)):
-                for k in (0, 1):
-                    det = {
-                        "image_index": i,
-                        "bbox": [4 + k, 8 + k, 60, 72],
-                        "confidence": round(0.9 - 0.1 * k, 2),
-                        "class_id": 0,
-                        "class_name": "person",
-                    }
-                    if command == "track":
-                        det["track_id"] = self._track_id
-                        self._track_id += 1
-                    dets.append(det)
+            imgsz = int(params.get("imgsz") or 640)  # accepted for shape fidelity
+            env_encoding = dict(ENCODING)
+            annotated_video = None
+            if video:
+                # emulate server-side decode + frame_step sampling (no real
+                # frames available here; we just report a believable shape
+                # with the real box's frame_index spacing).
+                step = max(1, int(params.get("frame_step") or 1))
+                cap = max(1, int(params.get("max_frames") or 1024))
+                detections, annotated, frame_index, n = [], [], 0, 0
+                while n < cap:
+                    detections.append(record(frame_index, n))
+                    annotated.append(jpeg(n))
+                    frame_index += step
+                    n += 1
+                status = {"source": "video", "frames_in_video": 211,
+                          "frame_step": step}
+                env_encoding = dict(ENCODING, annotated_video="identity")
+                annotated_video = MP4
+            else:
+                list_imgs = list(imgs)
+                detections, annotated = [], []
+                for n in range(len(list_imgs)):
+                    detections.append(record(n, n))
+                    annotated.append(jpeg(n))
+                status = {"source": "images"}
 
-            env = pb2.Envelope(config_json=json.dumps({"yolo": {
-                "status": "done", "command": command,
-                "num_images": len(imgs), "num_detections": len(dets),
-                "encoding": {"images": "identity", "detections": "json"}}}))
-            # annotated "JPEGs" — the fake echoes the input bytes
-            env.data["images"].CopyFrom(
-                aux.wrap_value([b"jpg:" + str(i).encode() for i in range(len(imgs))]))
+            env = pb2.Envelope(config_json=json.dumps({
+                "yolo": {"status": "done", "weights": "yolov8n.pt",
+                         "runtime": 0.42, "num_frames": len(detections),
+                         "frames_sampled": len(detections),
+                         "num_detections": len(detections),
+                         "encoding": env_encoding, **status}}))
             env.data["detections"].CopyFrom(
-                aux.wrap_value(json.dumps(dets).encode("utf-8")))
+                aux.wrap_value(json.dumps(detections).encode("utf-8")))
+            env.data["annotated"].CopyFrom(aux.wrap_value(annotated))
+            if "annotated_video" in env_encoding:
+                env.data["annotated_video"].CopyFrom(aux.wrap_value(annotated_video))
             return env
 
     return FakeBox(FakeYolo(), pb2, pb2_grpc)

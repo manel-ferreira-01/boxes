@@ -48,7 +48,7 @@ def test_defs_endpoint_shape(client):
     r = client.get("/api/defs")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["defs"]) == 7      # all standard boxes; opencv_box still pre-contract
+    assert len(body["defs"]) == 7     # opencv out of scope (pre-contract)
     assert "image_upload" in body["vocabulary"]["widgets"]
     assert "overlay" in body["vocabulary"]["visualizers"]
 
@@ -166,74 +166,117 @@ def test_moge_full_round_trip(client, fake_moge):
 
 
 def test_yolo_full_round_trip(client, fake_yolo):
-    """Full panel path for the migrated yologpt: namespaced `yolo` section,
-    command dispatch, flat JSON detections decoded via the declared `json`
-    codec, annotated JPEGs as file artifacts — and track state that persists
-    across calls until an explicit reset (never auto-reset)."""
+    """The full panel path for the detection box: declared ``json``/``identity``
+    encodings, per-frame detection records inline (the ``table`` visualizer
+    reads them), annotated frames as image/jpeg file artifacts (the
+    ``image_grid`` visualizer fetches them), the single-``b`` video input,
+    and the box's in-band validation error for both-fields."""
     fid = _seed(client, fake_yolo, "yolo lab", "yolo")
 
-    def upload(n):
-        r = client.post("/api/upload", files={"file": (
-            f"frame{n}.jpg", io.BytesIO(b"jpeg-bytes" + str(n).encode()),
-            "image/jpeg")})
-        assert r.status_code == 201, r.text
-        return r.json()["ref"]
+    up = [client.post("/api/upload",
+                      files={"file": (f"f{n}.jpg", io.BytesIO(b"jpeg-n"),
+                                      "image/jpeg")}) for n in (0, 1)]
+    assert all(u.status_code == 201 for u in up), [u.text for u in up]
+    refs = [u.json()["ref"] for u in up]
 
-    ref = upload(0)
-
-    # -- detect ----------------------------------------------------------------
+    # --- images ------------------------------------------------------
     r = client.post("/api/call", json={
         "fleet_id": fid,
-        "data": {"images": [ref]},
-        "parameters": {"conf": 0.5, "iou": 0.7},
-        "command": "detect",
+        "data": {"images": refs},
+        "parameters": {"conf": 0.25, "weights": "yolov8n.pt"},
     })
     assert r.status_code == 200, r.text
     body = r.json()
+
     assert body["box"] == "yolo" and body["status"] == "done"
-    assert body["declared_encoding"] == {"images": "identity",
-                                         "detections": "json"}
+    assert body["declared_encoding"] == {"detections": "json",
+                                         "annotated": "identity"}
+    assert body["config_extra"]["weights"] == "yolov8n.pt"
+    assert body["config_extra"]["source"] == "images"
+
+    # detections: JSON-decoded, inline, one record per frame
     dets = body["fields"]["detections"]
     assert isinstance(dets, list) and len(dets) == 2
-    assert dets[0]["image_index"] == 0 and dets[0]["class_name"] == "person"
-    assert "track_id" not in dets[0]
-    imgs = body["fields"]["images"]
-    # single annotated JPEG -> file artifact, fetched byte-identical
-    assert imgs[0]["kind"] == "file", imgs
-    tok = imgs[0]["url"].rsplit("/", 1)[-1]
-    assert client.get(f"/api/file/{tok}").content.startswith(b"jpg:")
+    assert set(dets[0]) == {"frame_index", "width", "height", "boxes",
+                            "class_ids", "labels", "scores"}
+    assert dets[0]["boxes"] == [[10.5, 20.25, 30.0, 40.0]]
+    assert dets[0]["labels"] == ["dog"] and dets[0]["class_ids"] == [16]
+    assert dets[1]["frame_index"] == 1
 
-    # -- track is stateful: ids accumulate across calls ------------------------
-    r1 = client.post("/api/call", json={
-        "fleet_id": fid, "data": {"images": [upload(1)]},
-        "parameters": {"conf": 0.5, "iou": 0.7, "tracker": "botsort.yaml"},
-        "command": "track"})
-    assert r1.status_code == 200, r1.text
-    b1 = r1.json()
-    ids1 = [d["track_id"] for d in b1["fields"]["detections"]]
-    assert ids1 == [0, 1], ids1
+    # annotated: one image/jpeg file artifact per frame, fetchable
+    ann = body["fields"]["annotated"]
+    assert len(ann) == 2
+    assert all(a["kind"] == "file" and a["mime"] == "image/jpeg" for a in ann)
+    tok = ann[0]["url"].rsplit("/", 1)[-1]
+    g = client.get(f"/api/file/{tok}")
+    assert g.status_code == 200
+    assert g.content.startswith(b"\xff\xd8\xff") and g.content[:31].startswith(
+        b"\xff\xd8\xff\xe0fake-annotated-0")
 
-    r2 = client.post("/api/call", json={
-        "fleet_id": fid, "data": {"images": [upload(2)]},
-        "parameters": {"conf": 0.5, "iou": 0.7},
-        "command": "track"})
-    b2 = r2.json()
-    ids2 = [d["track_id"] for d in b2["fields"]["detections"]]
-    assert ids2 == [2, 3], ids2      # continued, not reset between calls
+    # --- video (single b field -> server-side decode contract) --------
+    upv = client.post("/api/upload",
+                      files={"file": ("clip.mp4", io.BytesIO(b"\x00\x00\x00\x14ftypisom"),
+                                      "video/mp4")})
+    assert upv.status_code == 201, upv.text
+    rv = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"video": upv.json()["ref"]},
+        "parameters": {"frame_step": 30, "max_frames": 4},
+    })
+    assert rv.status_code == 200, rv.text
+    bv = rv.json()
+    assert bv["status"] == "done"
+    assert bv["config_extra"]["source"] == "video"
+    assert bv["config_extra"]["frames_in_video"] == 211
+    v_dets = bv["fields"]["detections"]
+    assert [d["frame_index"] for d in v_dets] == [0, 30, 60, 90]   # frame_step spacing
+    assert len(bv["fields"]["annotated"]) == 4
+    # video input -> a real video out: mp4 file artifact (the `video` visualizer)
+    av = bv["fields"]["annotated_video"]
+    assert av["kind"] == "file" and av["mime"] == "video/mp4"
+    tok = av["url"].rsplit("/", 1)[-1]
+    g = client.get(f"/api/file/{tok}")
+    assert g.status_code == 200 and g.content[4:8] == b"ftyp"
+    # images calls carry no video out
+    assert "annotated_video" not in body["fields"]
 
-    # -- explicit reset restarts ids ----------------------------------------- 
-    r3 = client.post("/api/call", json={
-        "fleet_id": fid, "command": "reset"})
-    assert r3.status_code == 200, r3.text
-    assert r3.json()["status"] in ("done",)          # reset is a valid call
+    # --- box validation: both fields -> in-band error, no HTTP 500 ---
+    rb = client.post("/api/call", json={
+        "fleet_id": fid,
+        "data": {"images": [refs[0]], "video": upv.json()["ref"]},
+    })
+    assert rb.status_code == 200, rb.text
+    bb = rb.json()
+    assert bb["status"] == "error" and "not both" in bb["error"]
 
-    r4 = client.post("/api/call", json={
-        "fleet_id": fid, "data": {"images": [upload(3)]},
-        "parameters": {"conf": 0.5, "iou": 0.7},
-        "command": "track"})
-    b4 = r4.json()
-    ids4 = [d["track_id"] for d in b4["fields"]["detections"]]
-    assert ids4 == [0, 1], ids4      # restarted after reset
+
+def test_file_range_partial_content(client, fake_yolo):
+    """`/api/file` must honour Range (206) — the browser's <video> player
+    seeks with Range requests; a 200-only server makes the player bounce
+    and can refuse to play/seek."""
+    fid = _seed(client, fake_yolo, "yolo lab", "yolo")
+    upv = client.post("/api/upload",
+                      files={"file": ("v.mp4", io.BytesIO(b"\x00\x00\x00\x14ftypisom" * 4),
+                                      "video/mp4")})
+    tok = upv.json()["ref"].lstrip("@")
+    full = client.get(f"/api/file/{tok}")
+    assert full.status_code == 200 and full.headers.get("accept-ranges") == "bytes"
+    body = full.content
+    assert full.headers.get("content-length") == str(len(body))
+
+    r = client.get(f"/api/file/{tok}", headers={"range": "bytes=4-7"})
+    assert r.status_code == 206
+    assert r.content == b"ftyp"          # 'ftyp' magic at offset 4
+    assert r.headers["content-range"] == f"bytes 4-7/{len(body)}"
+    assert int(r.headers["content-length"]) == 4
+
+    r = client.get(f"/api/file/{tok}", headers={"range": f"bytes={len(body) - 4}-"})
+    assert r.status_code == 206 and r.content == body[-4:]
+    assert r.headers["content-range"] == f"bytes {len(body) - 4}-{len(body) - 1}/{len(body)}"
+
+    # unsatisfiable start -> 416, not a 500
+    r = client.get(f"/api/file/{tok}", headers={"range": f"bytes={len(body) + 10}-"})
+    assert r.status_code == 416
 
 
 def test_box_error_surfaces_as_status(client, std_pb):

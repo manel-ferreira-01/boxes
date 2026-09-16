@@ -54,7 +54,7 @@ jobs:
           - { dir: lang_segm,     image: lang_segm }
           - { dir: textEmbedding, image: textembedding }
           - { dir: opencv_box,    image: opencv_box }
-          - { dir: yologpt,       image: yologpt }
+          - { dir: yolo,         image: yolo }
           - { dir: vggt,          image: vggt }
           - { dir: moge_box,      image: moge_box }
     steps:
@@ -133,7 +133,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           echo "Pin fleet/docker-compose.yml to these digests for a fully reproducible fleet:"
-          for image in clip tapnext_tracker lang_segm textembedding opencv_box yologpt vggt; do
+          for image in clip tapnext_tracker lang_segm textembedding opencv_box yolo vggt moge_box; do
             d=$(docker buildx imagetools inspect "ghcr.io/${OWNER}/${image}:${VER}" 2>/dev/null \
                 | awk '/^Digest:/{print $2}')
             echo "  $image -> ghcr.io/${OWNER}/${image}@${d:-<push failed — check that job>}"

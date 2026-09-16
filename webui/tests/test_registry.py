@@ -19,11 +19,11 @@ EXPECTED_IDS = {"clip", "tapnext", "lang_sam", "sbert", "vggt", "moge", "yolo"}
 
 
 def test_out_of_scope_boxes_are_absent(reg):
-    """yologpt / opencv_box predate the shared envelope (Process) contract
-    and are intentionally skipped until they migrate — the webui stays
-    contract-only.  Re-add their definitions when the boxes do."""
+    """opencv_box predates the shared envelope (Process) contract and is
+    intentionally skipped until it migrates — the webui stays contract-only.
+    Re-add its definition when the box does."""
     ids = {d.id for d in reg}
-    assert "yologpt" not in ids and "opencv" not in ids
+    assert "opencv" not in ids
 
 
 def test_all_defs_load(reg):
@@ -102,6 +102,22 @@ def test_moge_maps_are_visualized_per_item(reg):
     assert c.params["mask"] == "mask"
     assert c.base == "images"
     assert any(r.field == "*" for r in d.results)          # fallback renderer
+
+
+def test_yolo_detection_def(reg):
+    d = reg.get("yolo")
+    assert d.box_key == "yolo"
+    assert set(d.command.values) == {"detect", "reset"}
+    assert d.command.default == "detect"
+    assert {f.field for f in d.inputs} == {"images", "video"}
+    params = {p.key for p in d.parameters}
+    assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
+    viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
+    # the panel is video + detections table; per-frame JPEGs have no
+    # dedicated block (they fall to the `*` wildcard / artifacts list)
+    assert viz == {"annotated_video": "video", "detections": "table"}
+    assert [r.field for r in d.results if r.field != "*"][0] == "annotated_video"
+    assert d.results[-1].field == "*"
 
 
 def test_non_process_refused():

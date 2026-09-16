@@ -75,7 +75,7 @@ FLEET = [
     (
         "yolo",       "localhost:9068",
         {"images": [DOG, CAR]},
-        {"yolo":      {"command": "detect", "parameters": {"conf": 0.5}}},
+        {"yolo":    {"command": "detect", "parameters": {"save_annotated": False}}},
     ),
 ]
 

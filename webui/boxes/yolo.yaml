@@ -1,66 +1,86 @@
-# yologpt — YOLOv11 detection & tracking (stateful in track mode).
-# Authoritative request shape: ../../images/yologpt/README.md
+# YOLO box — stateless object detection on images and videos.
+# Authoritative request shape: ../../images/yolo/README.md
 id: yolo
-name: "YOLOv11 · detection & tracking"
+name: "YOLO · object detection (images & video)"
 box_key: yolo
-docs: ../../images/yologpt/README.md
+docs: ../../images/yolo/README.md
 note: >
-  `detect` is stateless (one call per image batch); `track` accumulates the
-  tracker across calls on this box — use the Reset session action (or the
-  `reset` command) to restart track ids. Detections come back as one flat,
-  ordered list (`image_index` says which input image each row belongs to).
+  Stateless: one call detects over every frame you send. Send image files
+  (or a video — frames are extracted in your browser) for client-side frame
+  delivery, or upload a raw video file and the box decodes it server-side.
+  The panel leads with the annotated **video** (video input) and the
+  detections table; per-frame annotated JPEGs have no inline grid — they
+  stay in the artifacts list / raw JSON.
 
 inputs:
   - field: images
     widget: video_frames
     kind: bb
     multiple: true
-    required: true
+    required: false
     helper: >
-      send a video (mp4/webm/mov) — frames are extracted in your browser and
-      uploaded as images — or plain image files. In `track` mode the box
-      processes them as one sequence.
+      image files, or a video (mp4/webm/mov) whose frames are extracted in
+      your browser and sent as images.
+  - field: video
+    widget: file_upload
+    kind: b
+    multiple: false
+    required: false
+    helper: >
+      raw video file (mp4/avi/webm/mov) — the box decodes it server-side
+      (see frame_step / max_frames). Send either this or images, not both.
 
 command:
-  values: [detect, track, reset]
+  values: [detect, reset]
   default: detect
 
 parameters:
+  - key: weights
+    widget: select
+    values: ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov11n.pt", "yolov11s.pt"]
+    default: "yolov8n.pt"
+    placeholder: "fresh checkpoints download on first use (see box README for paths/URLs)"
   - key: conf
     widget: slider
     min: 0.0
     max: 1.0
     step: 0.05
-    default: 0.5
-    placeholder: "confidence threshold forwarded to YOLOv11 (0..1)"
+    default: 0.25
   - key: iou
     widget: slider
     min: 0.0
     max: 1.0
     step: 0.05
     default: 0.7
-    placeholder: "IoU threshold forwarded to YOLOv11 (0..1)"
-  - key: tracker
+  - key: imgsz
     widget: select
-    values: ["bytetrack.yaml", "botsort.yaml"]
-    default: "bytetrack.yaml"
-    placeholder: "tracker backend (track mode)"
-
-session:
-  key: session_id          # not used by this box (no session_id contract key)
-  auto_generate: false
-  actions: [reset]
-  note: >
-    The tracker state lives on the box (server-global) and is keyed by
-    nothing — Reset clears it. `auto_generate` is off because `track` calls
-    must keep accumulating; `detect` ignores the tracker state entirely.
+    values: ["320", "416", "640", "960"]
+    default: "640"
+  - key: classes
+    widget: tags
+    placeholder: "class ids to keep (e.g. 16 = dog); empty = all classes"
+  - key: save_annotated
+    widget: select
+    values: ["true", "false"]
+    default: "true"
+  - key: frame_step
+    widget: number
+    default: 1
+    placeholder: "video: sample every Nth frame"
+  - key: max_frames
+    widget: number
+    default: 128
+    placeholder: "video: safety cap on decoded frames"
 
 results:
-  - field: images
-    visualizer: image_grid
-    caption: "annotated images (boxes drawn, one per input)"
+  # Video input first: one annotated mp4 (source fps, H.264) is the view.
+  # The per-frame JPEGs (``annotated``) get no dedicated block — they fall
+  # to the ``*`` wildcard and stay reachable via the artifacts list.
+  - field: annotated_video
+    visualizer: video
+    caption: "annotated video (video input only; source fps, H.264)"
   - field: detections
     visualizer: table
-    caption: "image_index · bbox [x1,y1,x2,y2] · confidence · class (track_id in track mode)"
+    caption: "per-frame detections (boxes xyxy, class id, label, score)"
   - field: "*"
     visualizer: json

@@ -9,6 +9,8 @@
 # Test fixtures (inputs) referenced by the committed tests / fleet demos — tracked
 !images/clip/test/dog.jpg
 !images/clip/test/car.jpg
+!images/yolo/test/dog.jpg
+!images/yolo/test/car.jpg
 !images/opencv_box/test/00.jpg
 !images/opencv_box/test/01.jpg
 !images/tapnext_tracker/test/apple.mp4

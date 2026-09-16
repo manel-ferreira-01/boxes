@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
-import type { BoxDef, CallResult, FleetEntry, ParamDef } from "../api";
+import type { BoxDef, CallResult, FleetEntry, ParamDef, SerRef } from "../api";
 import { Widget } from "../form/widgets";
 import type { FValue } from "../form/widgets";
 import { ErrorBox, Spinner, StatusChip, bytesShort, fmtNum } from "../ui";
@@ -718,6 +718,19 @@ function ResultBlock({
         ? <GLBView url={url} title={title} />
         : <div className="note">no glb payload in this response</div>;
     }
+    case "video": {
+      // video file artifact (e.g. an annotated mp4) -> native player
+      const url = isRef(v) ? (v as { url?: string }).url : typeof v === "string" ? v : null;
+      return (
+        <div>
+          {title && <div className="viz-caption">{title}</div>}
+          {url
+            ? <video controls preload="metadata" src={url}
+                     style={{ maxWidth: "100%", maxHeight: 480, background: "#000" }} />
+            : <div className="note">no video payload in this response</div>}
+        </div>
+      );
+    }
     case "points": {
       // per-item point clouds → orbiting three.js scenes; the def names the
       // item props.  Preferred: `depth` (+ `intrinsics`, pixel back-projection);
@@ -752,12 +765,21 @@ function ResultBlock({
       );
     }
     case "download": {
-      const url = isRef(v) ? (v as { url?: string }).url : null;
+      // A single file ref, or a list of them (e.g. per-frame JPEGs) → one
+      // link per item.  No preview: the point is to grab the raw files.
+      const refs = Array.isArray(v) && v.length > 0 && v.every(isRef)
+        ? (v as SerRef[])
+        : isRef(v) ? [v as SerRef] : [];
       return (
         <div>
           <div className="viz-caption">{title}</div>
-          {url
-            ? <span className="artifact"><span className="kind">{rd.field}</span><a href={url} download>download</a></span>
+          {refs.length
+            ? refs.map((ref, i) => (
+                <span key={i} className="artifact">
+                  <span className="kind">{rd.field}{refs.length > 1 ? ` #${i + 1}` : ""}</span>
+                  <a href={(ref as { url?: string }).url} download>download</a>
+                </span>
+              ))
             : <div className="note">no file artifact for {rd.field}</div>}
         </div>
       );
