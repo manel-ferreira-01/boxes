@@ -471,7 +471,14 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
             if spec["save_annotated"]:
                 annotated_bgr, annotated = [], []
                 for r in results:
-                    bgr_frame = cv2.cvtColor(r.plot(), cv2.COLOR_RGB2BGR)
+                    # ``r.plot()`` is BGR: ultralytics draws its annotations
+                    # on the *original* frame, which we decoded BGR with
+                    # cv2. Keep it BGR — ``cv2.imencode`` and the mp4v
+                    # ``VideoWriter`` both expect BGR, and the H.264 path
+                    # does its own BGR->RGB conversion before x264.  Converting
+                    # *here* (as before) double-swapped channels and put
+                    # red/blue the wrong way round in the JPEGs and video.
+                    bgr_frame = np.ascontiguousarray(r.plot())
                     annotated_bgr.append(bgr_frame)
                     ok, buf = cv2.imencode(".jpg", bgr_frame,
                                            [int(cv2.IMWRITE_JPEG_QUALITY), 90])
