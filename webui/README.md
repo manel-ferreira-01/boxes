@@ -209,5 +209,6 @@ in-memory by design; `fleet.json` is the only durable state.
 4. **next** — polish: vggt camera auto-fit on a real reconstruction
    (needs a live vggt box), side-by-side prompts on lang_sam
 5. **done** — standard `yolo` box (image + video detection) added to the webui
-   via [`boxes/yolo.yaml`](boxes/yolo.yaml) → `image_grid` (annotated) + `table`
-   (per-frame detections); no code changes, one YAML file
+   via [`boxes/yolo.yaml`](boxes/yolo.yaml) → `video` (annotated_video) +
+   `table` (per-frame detections); the panel has no JPEG grid — per-frame
+   annotated JPEGs surface via the artifacts list

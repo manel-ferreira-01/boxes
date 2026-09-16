@@ -8,6 +8,9 @@ note: >
   Stateless: one call detects over every frame you send. Send image files
   (or a video — frames are extracted in your browser) for client-side frame
   delivery, or upload a raw video file and the box decodes it server-side.
+  The panel leads with the annotated **video** (video input) and the
+  detections table; per-frame annotated JPEGs have no inline grid — they
+  stay in the artifacts list / raw JSON.
 
 inputs:
   - field: images
@@ -70,12 +73,12 @@ parameters:
     placeholder: "video: safety cap on decoded frames"
 
 results:
+  # Video input first: one annotated mp4 (source fps, H.264) is the view.
+  # The per-frame JPEGs (``annotated``) get no dedicated block — they fall
+  # to the ``*`` wildcard and stay reachable via the artifacts list.
   - field: annotated_video
     visualizer: video
-    caption: "annotated frames as one mp4 (video input only; source fps)"
-  - field: annotated
-    visualizer: image_grid
-    caption: "annotated frames (JPEG)"
+    caption: "annotated video (video input only; source fps, H.264)"
   - field: detections
     visualizer: table
     caption: "per-frame detections (boxes xyxy, class id, label, score)"

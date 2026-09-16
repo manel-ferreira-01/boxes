@@ -127,8 +127,9 @@ Def-driven extras (generic, no box names in code):
 * **`video` result def** — a video file artifact (`video/mp4`/…) plays in a
   native `<video controls>` player (no codec work: the browser does it).
   Used by yolo: a video in → `annotated_video` out — the same annotated
-  frames the box draws for the `image_grid`, re-encoded as one mp4 at the
-  source video's fps. The box encodes **H.264** (PyAV bundles FFmpeg incl.
+  frames the box also returns as per-frame `annotated` JPEGs (which have no
+  inline panel block — the video is the view; the JPEGs stay downloadable via
+  the artifacts list), re-encoded as one mp4 at the source video's fps. The box encodes **H.264** (PyAV bundles FFmpeg incl.
   libx264) because browsers can't decode `mp4v`; `/api/file` honours
   `Range`/`206` so the player's seeks don't re-download the clip.
 * **`points` result def** — per-item point cloud, orbit/zoom, rendered
@@ -199,6 +200,7 @@ Def-driven extras (generic, no box names in code):
    click-through (all code-built and data-verified, just not eyeballed).
 4. ~~`image_grid` for yologpt once it migrates~~ — the repo now ships a
    standard `yolo` box (`images/yolo`, envelope-conformant, ultralytics) with a
-   webui def (`boxes/yolo.yaml`): `image_grid` over the annotated frames,
-   `table` over the per-frame detection JSON.
+   webui def (`boxes/yolo.yaml`): `video` over `annotated_video`, `table` over
+   the per-frame detection JSON (no JPEG grid — the per-frame `annotated`
+   JPEGs surface via the `*` fallback / artifacts list).
 5. Optional: code-split the three.js chunk (currently one ~780 kB bundle).

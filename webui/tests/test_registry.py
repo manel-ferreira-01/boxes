@@ -113,8 +113,11 @@ def test_yolo_detection_def(reg):
     params = {p.key for p in d.parameters}
     assert {"weights", "conf", "iou", "imgsz", "classes", "save_annotated", "frame_step", "max_frames"} == params
     viz = {r.field: r.visualizer for r in d.results if r.field != "*"}
-    assert viz == {"annotated_video": "video", "annotated": "image_grid",
-                   "detections": "table"}
+    # the panel is video + detections table; per-frame JPEGs have no
+    # dedicated block (they fall to the `*` wildcard / artifacts list)
+    assert viz == {"annotated_video": "video", "detections": "table"}
+    assert [r.field for r in d.results if r.field != "*"][0] == "annotated_video"
+    assert d.results[-1].field == "*"
 
 
 def test_non_process_refused():
