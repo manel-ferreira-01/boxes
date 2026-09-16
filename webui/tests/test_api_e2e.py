@@ -250,6 +250,35 @@ def test_yolo_full_round_trip(client, fake_yolo):
     assert bb["status"] == "error" and "not both" in bb["error"]
 
 
+def test_file_range_partial_content(client, fake_yolo):
+    """`/api/file` must honour Range (206) — the browser's <video> player
+    seeks with Range requests; a 200-only server makes the player bounce
+    and can refuse to play/seek."""
+    fid = _seed(client, fake_yolo, "yolo lab", "yolo")
+    upv = client.post("/api/upload",
+                      files={"file": ("v.mp4", io.BytesIO(b"\x00\x00\x00\x14ftypisom" * 4),
+                                      "video/mp4")})
+    tok = upv.json()["ref"].lstrip("@")
+    full = client.get(f"/api/file/{tok}")
+    assert full.status_code == 200 and full.headers.get("accept-ranges") == "bytes"
+    body = full.content
+    assert full.headers.get("content-length") == str(len(body))
+
+    r = client.get(f"/api/file/{tok}", headers={"range": "bytes=4-7"})
+    assert r.status_code == 206
+    assert r.content == b"ftyp"          # 'ftyp' magic at offset 4
+    assert r.headers["content-range"] == f"bytes 4-7/{len(body)}"
+    assert int(r.headers["content-length"]) == 4
+
+    r = client.get(f"/api/file/{tok}", headers={"range": f"bytes={len(body) - 4}-"})
+    assert r.status_code == 206 and r.content == body[-4:]
+    assert r.headers["content-range"] == f"bytes {len(body) - 4}-{len(body) - 1}/{len(body)}"
+
+    # unsatisfiable start -> 416, not a 500
+    r = client.get(f"/api/file/{tok}", headers={"range": f"bytes={len(body) + 10}-"})
+    assert r.status_code == 416
+
+
 def test_box_error_surfaces_as_status(client, std_pb):
     """A box answering status=error is a *successful* call that reports an
     error in-band — the client never raises; the UI must not either."""

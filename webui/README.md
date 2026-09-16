@@ -115,6 +115,9 @@ section), `declared_encoding` (the codec the box declared, verbatim),
 * the request is validated **against the box definition** — unknown
   parameters, section keys, data fields, commands, or actions are 400 with
   `known: [...]`;
+* `GET /api/file/{token}` honours **`Range` → `206 Partial Content`**
+  (`Accept-Ranges: bytes` is advertised), so HTML5 `<video>` seeks work
+  without re-downloading the artifact;
 * **reset semantics**: `command: reset` *is* the reset (no `reset_first`);
   stateful boxes (tapnext) are **never** auto-reset — that would kill a live
   sequence; stateless boxes get the client's safe no-op `reset_first`.

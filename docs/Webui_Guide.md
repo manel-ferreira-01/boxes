@@ -128,8 +128,9 @@ Def-driven extras (generic, no box names in code):
   native `<video controls>` player (no codec work: the browser does it).
   Used by yolo: a video in → `annotated_video` out — the same annotated
   frames the box draws for the `image_grid`, re-encoded as one mp4 at the
-  source video's fps (`mp4v` fourcc; degrades to just the JPEG list when a
-  writer is unavailable).
+  source video's fps. The box encodes **H.264** (PyAV bundles FFmpeg incl.
+  libx264) because browsers can't decode `mp4v`; `/api/file` honours
+  `Range`/`206` so the player's seeks don't re-download the clip.
 * **`points` result def** — per-item point cloud, orbit/zoom, rendered
   directly with three.js `THREE.Points` — a point cloud is typed arrays,
   so there is **no GLB/glTF encoding at all** (no writer, no blobs, no

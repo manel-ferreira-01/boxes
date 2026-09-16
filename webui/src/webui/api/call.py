@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, UploadFile, File, Body
+from fastapi import APIRouter, UploadFile, File, Body, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,14 +51,52 @@ def create_call_router(registry: Registry, fleet: Fleet, store: ArtifactStore,
         }
 
     @r.get("/file/{token}")
-    def file(token: str):
+    def file(token: str, request: Request):
+        """Serve an artifact, with HTTP `Range` / `206 Partial Content`.
+
+        HTML5 `<video>` seeks by sending `Range: bytes=<start>-<end>`;
+        a server that only answers full `200` makes the player bounce,
+        re-download and can refuse to seek.  Honoring ranges (plus
+        `Accept-Ranges` + accurate `Content-Length`) is what makes the
+        annotated mp4 scrub in the browser's native player."""
         try:
             art = store.get(token)
         except ArtifactMissing as e:
             raise WebUIError(404, {"token": token}) from e
         extra = {k: v for k, v in art.extra.items() if k in ("dtype", "shape", "pytype", "note")}
-        return Response(art.data, media_type=art.content_type,
-                        headers=extra and {f"x-artifact-{k}": str(v) for k, v in extra.items()})
+        headers = {f"x-artifact-{k}": str(v) for k, v in extra.items()}
+        data = art.data
+        total = len(data)
+        headers["Accept-Ranges"] = "bytes"
+
+        range_hdr = request.headers.get("range")
+        if range_hdr and range_hdr.startswith("bytes="):
+            # only the first single-range spec is honoured (players send one)
+            spec = range_hdr.split("bytes=", 1)[1].split(",")[0].strip()
+            try:
+                start_s, _, end_s = spec.partition("-")
+                if start_s == "":
+                    # suffix range `bytes=-N`: the final N bytes
+                    length = int(end_s or 0)
+                    start, end = max(0, total - length), total - 1
+                else:
+                    start = int(start_s)
+                    end = min(int(end_s), total - 1) if end_s else total - 1
+            except (ValueError, TypeError):
+                start, end = 0, total - 1
+            if start >= total or start > end:
+                return Response(status_code=416,
+                                headers={"Content-Range": f"bytes */{total}"})
+            chunk = data[start:end + 1]
+            headers.update({
+                "Content-Range": f"bytes {start}-{end}/{total}",
+                "Content-Length": str(len(chunk)),
+            })
+            return Response(chunk, media_type=art.content_type,
+                            status_code=206, headers=headers)
+
+        headers["Content-Length"] = str(total)
+        return Response(data, media_type=art.content_type, headers=headers)
 
     @r.post("/call")
     def call(body: CallBody):

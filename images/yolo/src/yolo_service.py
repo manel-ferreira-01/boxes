@@ -20,7 +20,10 @@ workspace).
 
 Payloads: ``detections`` is JSON (declared via the ``encoding`` contract
 key so ``boxes_client`` decodes it); ``annotated`` is a list of JPEG bytes
-(declared ``identity``).
+(declared ``identity``); a video input additionally yields
+``annotated_video`` — the annotated frames re-encoded as one MP4 (H.264
+when PyAV is available so the browser's ``<video>`` can play it, mp4v
+fallback otherwise).
 """
 
 import concurrent.futures as futures
@@ -275,39 +278,81 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                     pass
 
     @staticmethod
-    def _encode_annotated_video(annotated_frames, fps):
-        """Encode annotated BGR frames into one MP4 (``mp4v`` fourcc).
+    def _encode_mp4(frames, fps):
+        """Encode BGR frames into one MP4, preferring the **browser-playable
+        H.264** (PyAV bundles the FFmpeg libraries incl. libx264).  Degrades
+        to ``mp4v`` (MPEG-4 Part 2, plays in VLC but NOT in HTML5 <video>)
+        when PyAV is missing or the encode fails.  Returns ``(bytes, codec)``
+        or ``(None, None)"."""
+        if not frames:
+            return None, None
+        h, w = frames[0].shape[:2]
+        # H.264 needs even dimensions — pad by one black pixel when odd.
+        if w % 2 or h % 2:
+            w2, h2 = w + w % 2, h + h % 2
+            frames = [cv2.copyMakeBorder(f, 0, h2 - h, 0, w2 - w,
+                                         cv2.BORDER_CONSTANT, value=0)
+                      for f in frames]
+        else:
+            w2, h2 = w, h
 
-        Returns the mp4 bytes, or ``None`` when the writer is unavailable
-        (degrade, never fail the call — the JPEG list still carries the
-        frames)."""
-        if not annotated_frames:
-            return None
-        h, w = annotated_frames[0].shape[:2]
-        tmp_path = None
+        # --- preferred: H.264 via PyAV (browser <video> support) ----------
+        try:
+            import av
+        except ImportError:
+            av = None
+        if av is not None:
+            tmp_path = None
+            try:
+                tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+                tmp_path = tmp.name
+                tmp.close()
+                rate = max(1, int(round(fps))) if fps and fps > 0 else 30
+                container = av.open(tmp_path, mode="w")
+                stream = container.add_stream("libx264", rate=rate)
+                stream.width, stream.height, stream.pix_fmt = w2, h2, "yuv420p"
+                for frame in frames:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    for pkt in stream.encode(av.VideoFrame.from_ndarray(rgb, format="rgb24")):
+                        container.mux(pkt)
+                for pkt in stream.encode(None):      # flush
+                    container.mux(pkt)
+                container.close()
+                with open(tmp_path, "rb") as f:
+                    data = f.read()
+                return (data, "h264") if data else (None, None)
+            except (OSError, ValueError) as e:
+                logging.warning("h264 encode failed (%s); falling back to mp4v", e)
+            finally:
+                if tmp_path:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+
+        # --- fallback: mp4v via OpenCV (non-browser codecs are fine here) --
         try:
             tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
             tmp_path = tmp.name
             tmp.close()
             writer = cv2.VideoWriter(
-                tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+                tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps if fps and fps > 0 else 30.0, (w2, h2))
             if not writer.isOpened():
-                return None
-            for frame in annotated_frames:
+                return None, None
+            for frame in frames:
                 writer.write(frame)
             writer.release()
             with open(tmp_path, "rb") as f:
                 data = f.read()
-            return data if data else None
+            return (data, "mp4v") if data else (None, None)
         except (OSError, cv2.error):
             logging.exception("annotated_video encoding failed")
-            return None
+            return None, None
         finally:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+            try:
+                os.unlink(tmp_path)
+            except (OSError, NameError):
+                pass
 
     # -------------------------------------------------------------- inference
     def _detect_frame(self, r, frame, frame_index):
@@ -436,11 +481,13 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
                 encoding["annotated"] = "identity"
                 if source == "video":
                     # A video in -> a real video out: the same annotated
-                    # frames re-encoded as one mp4 (source fps).
-                    out_video = self._encode_annotated_video(annotated_bgr, fps)
+                    # frames re-encoded as one mp4 (source fps).  H.264 when
+                    # PyAV is available (browser <video>), else mp4v fallback.
+                    out_video, out_codec = self._encode_mp4(annotated_bgr, fps)
                     if out_video:
                         response_data["annotated_video"] = wrap_value(out_video)
                         encoding["annotated_video"] = "identity"
+                        extra_status["annotated_video_codec"] = out_codec
 
             return pipeline_pb2.Envelope(
                 config_json=json.dumps({

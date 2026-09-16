@@ -7,3 +7,4 @@ torchvision==0.18.1
 numpy==1.26.1
 opencv-python-headless
 ultralytics==8.4.153
+av==17.1.0  # H.264 for annotated_video (18.x needs py>=3.11; the image runs 3.10)

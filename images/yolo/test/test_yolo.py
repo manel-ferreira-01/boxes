@@ -200,11 +200,37 @@ def main():
             av = aux.unwrap_value(response.data["annotated_video"]) if "annotated_video" in response.data else None
             if not ann or not isinstance(ann, list) or len(ann) != len(detections if "detections" in response.data else []):
                 failures.append("video annotated missing/wrong shape")
+            codec = section.get("annotated_video_codec")
             if not isinstance(av, (bytes, bytearray)) or bytes(av)[4:8] != b"ftyp":
                 print(f"  annotated_video: not an mp4 ({type(av)})")
                 failures.append("video annotated_video")
             else:
-                print(f"  annotated: {len(ann)} JPEGs; annotated_video: {len(av)} bytes mp4")
+                # when PyAV is available the box must have encoded browser-
+                # playable H.264 — verify by decoding the artifact
+                codec_ok = True
+                try:
+                    import av as avlib
+                    import tempfile, os as _os
+                    _p = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+                    with open(_p, "wb") as _f:
+                        _f.write(bytes(av))
+                    _c = avlib.open(_p)
+                    got = _c.streams.video[0].codec_context.name
+                    _n = sum(1 for _ in _c.decode(video=0))
+                    _c.close()
+                    _os.unlink(_p)
+                    print(f"  annotated: {len(ann)} JPEGs; annotated_video: {len(av)} bytes, "
+                          f"codec={got} (declared {codec}), {_n} frames decoded")
+                    if got != "h264" or codec != "h264":
+                        codec_ok = False
+                except ImportError:
+                    print(f"  annotated: {len(ann)} JPEGs; annotated_video: {len(av)} bytes, "
+                          f"codec={codec} (av not available on test host, skipped verify)")
+                except Exception as e:
+                    codec_ok = False
+                    print(f"  annotated_video decode check failed: {e}")
+                if not codec_ok:
+                    failures.append("video annotated_video codec")
 
             # save_annotated=false drops both
             r2 = stub.Process(pipeline_pb2.Envelope(
