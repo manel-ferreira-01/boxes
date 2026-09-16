@@ -50,15 +50,9 @@ function detailOf(e: unknown): Record<string, unknown> {
   return { message: String(e) };
 }
 
-/** "status" / "error" keys live one level deep under the box's section. */
-function cfgSectionValue<T>(res: CallResult, key: string): T | null {
-  for (const v of Object.values(res.config_extra || {})) {
-    if (v && typeof v === "object" && !Array.isArray(v) && key in (v as object)) {
-      return (v as Record<string, unknown>)[key] as T;
-    }
-  }
-  return null;
-}
+/** "status" / "error" are top-level on the wire (see serialize.py);
+ *  ``config_extra`` carries only the box section's *other* keys. */
+
 
 /** upload ref "@tok" -> fetchable URL; pass through real URLs. */
 function fileUrl(ref: string): string {
@@ -272,17 +266,22 @@ function Console({ def }: { def: BoxDef }) {
         session_id: def.session ? (session || null) : null,
         timeout: 600,
       });
-      const st = cfgSectionValue<unknown>(res, "status");
+      const st = res.status;
       const okView: View = { kind: "res", res };
       setView(okView);
-      setHistory((h) => [
-        {
+      setHistory((h) => {
+        const entry: HistItem = {
           at: Date.now(), boxName: entryName(fleetId), command,
           ok: true, status: st, durationMs: res.duration_ms,
           images: imageRefs, texts: textSnapshot(), view: okView,
-        },
-        ...h,
-      ].slice(0, 10));
+        };
+        // A *successful* `reset` clears the box's session — clear the
+        // console's accumulated view of it too: the tracks player assembles
+        // its steps from this history, so without this it keeps replaying
+        // the pre-reset frames (and trails across the reset).  A failed
+        // reset keeps history (the box kept its state).
+        return command === "reset" && st === "done" ? [entry] : [entry, ...h].slice(0, 10);
+      });
     } catch (e) {
       const detail = detailOf(e);
       const errView: View = { kind: "err", detail };
@@ -530,8 +529,8 @@ function ResultView({
   }
 
   const res = view.res;
-  const status = cfgSectionValue<unknown>(res, "status");
-  const err = cfgSectionValue<string>(res, "error");
+  const status = res.status;
+  const err = res.error;
   // the history entry that produced this view (carries the form snapshot)
   const current = history.find((h) => h.view === view);
   const enc = res.declared_encoding === null
