@@ -153,22 +153,22 @@ function Console({ def }: { def: BoxDef }) {
   }, [def.id]);
 
   // -------------------------------------------------------- session (tapnext)
+  // A reload / tab switch remounts this console and the viewer's history is
+  // dropped (pure React state).  A *persisted* session_id would then hand the
+  // box a live-but-dead session while the viewer is clean: the next call
+  // returns tracks spanning the dead frames + the new ones (nonsense).
+  // So: fresh box session per (re)mount — viewer and box stay in sync —
+  // and `regenerate` restarts mid-sequence the same way.
   const sessionKey = `boxes-webui-session-${def.id}-${fleetId}`;
 
   useEffect(() => {
     if (!def.session) return;
-    let s: string | null = null;
-    try { s = localStorage.getItem(sessionKey); } catch { /* private mode */ }
-    if (!s) s = genSession();
-    try { localStorage.setItem(sessionKey, s); } catch { /* ignore */ }
-    setSession(s);
+    setSession(genSession());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [def.session, sessionKey]);
 
   function regenSession(): void {
-    const s = genSession();
-    setSession(s);
-    try { localStorage.setItem(sessionKey, s); } catch { /* ignore */ }
+    setSession(genSession());
   }
 
   // -------------------------------------------------- image count for widgets

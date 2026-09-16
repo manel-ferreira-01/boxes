@@ -40,7 +40,10 @@ session:
   actions: [reset, list]
   note: >
     Opaque capability string — anyone who knows it can drive that session.
-    Sessions are reaped after TAPNEXT_SESSION_TTL idle time (default 1800 s).
+    A fresh ID is generated on every page load (the box starts a fresh
+    session, matching the fresh viewer); hit "regenerate" to restart
+    mid-sequence. Server-side sessions are reaped after
+    TAPNEXT_SESSION_TTL idle time (default 1800 s).
 
 results:
   - field: tracks

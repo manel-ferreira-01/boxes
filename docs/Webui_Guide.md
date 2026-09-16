@@ -194,9 +194,13 @@ Def-driven extras (generic, no box names in code):
   `overflow-wrap: anywhere` is explicitly excluded for `table.data`
 * First GPU call on a box takes a few seconds (CPU→GPU model migration);
   the API `timeout` (s) is honored per call.
-* tapnext sessions live server-side and are reaped after
-  `TAPNEXT_SESSION_TTL` (default 1800 s) — use the console **Reset** /
-  **regenerate session** before restarting a sequence.
+* tapnext sessions: a **fresh session ID is generated on every page load /
+  remount** — the viewer (call history) doesn't survive a reload, so a
+  persisted ID would mix a dead box session with a fresh viewer and the
+  tracks would span both (nonsense).  Viewer and box therefore start in
+  lockstep; use the console **Reset** / **regenerate** to restart
+  mid-sequence.  Server-side sessions are reaped after
+  `TAPNEXT_SESSION_TTL` (default 1800 s) regardless.
 * lang_sam decoded item keys: `boxes / masks / scores / text_labels /
   mask_scores` (a live test caught an early `bbox` typo).
 * test asset: `images/clip/test/dog.jpg`.
