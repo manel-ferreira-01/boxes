@@ -1,23 +1,20 @@
 name: boxes-fleet
 
-# Launch a bunch of boxes (prebuilt images from GitHub Container Registry)
-# side by side, all on the shared `pipeline.PipelineService` interface, each
-# on its own host port.
+# Local-build fleet: every service is built from its box's own directory
+# (../images/<box> using docker/Dockerfile) and run under a local tag — no
+# ghcr pull required. Use `docker compose build --parallel` to produce all 8
+# from source, `docker compose up -d` to start.
 #
-#   docker compose up -d          # start the fleet (docker pull ghcr.io/…)
-#   docker compose ps             # watch them come up
-#   python hello.py               # reach every box with ONE generic pattern
-#   docker compose down           # tear it down
+#   cd fleet
+#   docker compose build --parallel   # ~10–30 min; vggt (5 GB weights) is the long pole
+#   docker compose up -d
+#   docker compose ps                 # watch them come up
+#   python hello.py                   # reach every box with one generic pattern
+#   docker compose down
 #
-# Image versions: `:latest` follows the last published `boxes-v*` tag. For a
-# fully reproducible fleet, replace each tag with the immutable digest from
-# the `report digests` job of the publish workflow, e.g.
-#   ghcr.io/manel-ferreira-01/clip@sha256:…
-#
-# All boxes listen on 8061 internally; we map distinct host ports (906x).
-# GPU: each box requests the nvidia devices. To run the fleet on a CPU-only
-# host, delete the shared `gpu` block below -- the boxes will simply start on
-# CPU and degrade gracefully (slower).
+# All 8 boxes listen on 8061 internally; we map to host ports 9061–9068.
+# GPU: each service reserves all nvidia devices. For a CPU-only host, drop the
+# `<<: *gpu` merge from every service.
 
 x-gpu: &gpu
   deploy:
@@ -32,7 +29,8 @@ services:
 
   clip:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/clip:latest
+    build: { context: ../images/clip,          dockerfile: docker/Dockerfile }
+    image: boxes-local/clip
     container_name: box-clip
     ports: ["9061:8061"]
     environment: [ PORT=8061 ]
@@ -40,7 +38,8 @@ services:
 
   textembedding:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/textembedding:latest
+    build: { context: ../images/textEmbedding, dockerfile: docker/Dockerfile }
+    image: boxes-local/textembedding
     container_name: box-textembedding
     ports: ["9062:8061"]
     environment: [ PORT=8061 ]
@@ -48,15 +47,17 @@ services:
 
   tapnext:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/tapnext_tracker:latest
+    build: { context: ../images/tapnext_tracker, dockerfile: docker/Dockerfile }
+    image: boxes-local/tapnext
     container_name: box-tapnext
     ports: ["9063:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
 
-  lang_segm:
+  lang_sam:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/lang_segm:latest
+    build: { context: ../images/lang_segm,     dockerfile: docker/Dockerfile }
+    image: boxes-local/lang_sam
     container_name: box-lang_sam
     ports: ["9064:8061"]
     environment: [ PORT=8061 ]
@@ -64,35 +65,38 @@ services:
 
   opencv:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/opencv_box:latest
+    build: { context: ../images/opencv_box,    dockerfile: docker/Dockerfile }
+    image: boxes-local/opencv
     container_name: box-opencv
     ports: ["9065:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
 
-  # Heaviest pull in the ~12 GB image (1B weights baked in at build time).
-  # Skip it with `docker compose up -d <names...>` if you don't need 3D.
+  # Heaviest build in the fleet: the Dockerfile clones facebookresearch/vggt
+  # and downloads the VGGT-1B checkpoint (~5 GB) at build time.
   vggt:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/vggt:latest
+    build: { context: ../images/vggt,          dockerfile: docker/Dockerfile }
+    image: boxes-local/vggt
     container_name: box-vggt
     ports: ["9066:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
 
-  # MoGe-3 monocular geometry — CUDA-only box (it rejects CPU inference).
+  # MoGe-3 — CUDA-only box (it rejects CPU inference).
   moge:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/moge_box:latest
+    build: { context: ../images/moge_box,      dockerfile: docker/Dockerfile }
+    image: boxes-local/moge
     container_name: box-moge
     ports: ["9067:8061"]
     environment: [ PORT=8061 ]
     restart: unless-stopped
 
-  # YOLO object detection (ultralytics) over images and videos.
   yolo:
     <<: *gpu
-    image: ghcr.io/manel-ferreira-01/yolo:latest
+    build: { context: ../images/yolo,          dockerfile: docker/Dockerfile }
+    image: boxes-local/yolo
     container_name: box-yolo
     ports: ["9068:8061"]
     environment: [ PORT=8061 ]
