@@ -69,6 +69,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check(Array.isArray(c1.track_id) && c1.track_id.length === c1.boxes && c1.boxes > 0,
       `call1: ${c1.boxes} box(es), track_ids=${JSON.stringify(c1.track_id)}`);
     const id1 = c1.track_id && c1.track_id[0];
+    check(id1 === 1, `fresh session starts at base id (got ${id1})`);
 
     // ---- call 2 (same session) ----------------------------------------
     await page.locator('button', { hasText: /^Call$/ }).click();
@@ -97,7 +98,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check(ok, `call3 answered`);
     check(c3.track_id && typeof c3.track_id[0] === 'number',
       `post-reset call has a fresh track id (${c3.track_id && c3.track_id[0]})`);
-    check(c3.track_id && c3.track_id[0] !== id1, `post-reset id differs from pre-reset (${id1} -> ${c3.track_id && c3.track_id[0]})`);
+    check(c3.track_id && c3.track_id[0] === 1,
+      `post-reset restarts at base id (pre-reset ${id1} -> post ${c3.track_id && c3.track_id[0]})`);
 
     // ---- list (session action) ------------------------------------------
     await page.locator('button', { hasText: /^list$/ }).first().click();

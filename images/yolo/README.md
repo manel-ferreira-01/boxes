@@ -18,10 +18,14 @@ It follows the **tapnext multi-session contract**: the tracker state (object
 identities + id counter) lives per `session_id`, so one call runs detection
 + tracking over the frames you send, and *the same session* keeps stable
 track ids across calls while *different sessions* get independent id
-sequences. `reset` clears **this session's** tracker (other sessions are
-untouched), `list` gives the operator the active sessions, and idle sessions
-are reaped after `YOLO_SESSION_TTL` seconds (default 1800; `0` keeps them
-forever). Sessions live on the **box**, not in the image bytes — a box
+sequences. Every **fresh tracker** (new session id — regenerate, page
+reload, or right after `reset`) starts its numbering from the base, so
+"start over" always means `track_id` 1, 2, … — track ids are per-session
+namespaces and new sessions never collide with old ones. `reset` clears
+**this session's** tracker (other sessions are untouched), `list` gives the
+operator the active sessions, and idle sessions are reaped after
+`YOLO_SESSION_TTL` seconds (default 1800; `0` keeps them forever).
+Sessions live on the **box**, not in the image bytes — a box
 restart starts all of them fresh.
 
 ## Directory structure

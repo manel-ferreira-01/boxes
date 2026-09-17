@@ -85,9 +85,10 @@ session:
   actions: [reset, list]
   note: >
     Per-session tracker state (tapnext contract): track ids stay stable
-    across calls in this session only. A fresh ID is generated on every
-    page load; "reset" clears this session's tracker (track ids restart),
-    "list" shows the box's active sessions.
+    across calls in this session only, and every fresh tracker starts at
+    id 1 — so a new session (regenerate, page load) behaves like a reset.
+    "reset" clears this session's tracker; "list" shows the box's active
+    sessions.
 
 results:
   # Video input: one annotated mp4 (source fps, H.264) is the view.

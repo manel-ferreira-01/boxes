@@ -209,8 +209,14 @@ def main():
             print(f"  UNSTABLE ids: a1={ids['a1']} a2={ids['a2']}")
             failures.append("session id stability")
 
-    if ids.get("a1") and ids.get("b") and ids["a1"] != ids["b"]:
-        print(f"  independent sequences: t-a={ids['a1']} t-b={ids['b']}")
+    # fresh tracker = numbering from the base, for EVERY new session
+    # (regenerate / new key behaves like a reset — per-session namespaces)
+    for label in ("a1", "b"):
+        if ids.get(label) and ids[label][0] != 1:
+            print(f"  session {label} did NOT start at base: {ids[label]}")
+            failures.append(f"fresh session {label} base id")
+    if ids.get("a1") and ids.get("b"):
+        print(f"  each session starts at base: t-a={ids['a1']} t-b={ids['b']}")
 
     # reset scoped to t-a only; t-b is untouched
     response = stub.Process(pipeline_pb2.Envelope(
@@ -221,9 +227,12 @@ def main():
     out_a3 = call_session("t-a")
     if out_a3:
         box_ids3 = out_a3[1][0].get("track_id")
-        print(f"  t-a after reset: ids={box_ids3} (fresh tracker, new numbering)")
+        print(f"  t-a after reset: ids={box_ids3} (fresh tracker, numbering from base)")
         if out_a3[1][0]["boxes"] and not box_ids3:
             failures.append("post-reset track ids")
+        if box_ids3 and box_ids3[0] != 1:
+            print(f"  t-a after reset did NOT restart at base: {box_ids3}")
+            failures.append("post-reset base id")
         # t-b must still hold its id from before (scoped reset left it alone)
         out_b2 = call_session("t-b")
         if out_b2 and ids.get("b") and out_b2[1][0].get("track_id") == ids["b"]:

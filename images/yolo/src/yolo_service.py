@@ -17,10 +17,12 @@ multi-session contract as ``tapnext`` — see its service for the pattern):
   sessions = independent ID sequences.  Server-side sessions are reaped
   after ``YOLO_SESSION_TTL`` idle (default 1800 s; 0 keeps them forever).
 * ``command: reset`` — clears **this session's** tracker state (other
-  sessions' live tracks untouched) and rewinds the shared id counter, so
-  the caller's next objects start from the base — "reset" means "start
-  over" (tapnext's per-session counters restart unconditionally; track ids
-  are per-session namespaces).
+  sessions' live tracks untouched); the next call adopts a fresh tracker,
+  and ANY fresh tracker starts its numbering from the base (see
+  ``_attach_tracker``) — so "reset" always means "start over", exactly
+  like a brand-new session (new key / regenerate / page reload): track
+  ids are per-session namespaces and a new session can never collide
+  with an old one, so both start at 1.
 * ``command: list`` — operator view of active sessions (id/opaque only).
 
 One YOLO model is shared by all sessions; the ultralytics *tracker* object
@@ -257,29 +259,15 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
     def _reset_session(self, sess):
         """Clear ONE session's tracking state (tapnext semantics).
 
-        "Reset" means *start over*: the caller's next objects get fresh ids
-        from the base.  Ultralytics' id counter is class-level (shared by
-        all tracker instances), so we rewind it here — otherwise a session
-        would keep numbering where all other sessions left off (the
-        "reset but ids keep growing" surprise).  Track ids are per-session
-        namespaces: if another live session later assigns a number this
-        one used, that is an expected cross-session overlap, not a bug —
-        ids carry no meaning outside their own session (the same reason
-        tapnext's per-session counters restart unconditionally).
+        "Reset" means *start over*: the next call adopts a fresh tracker,
+        and ANY fresh tracker starts its numbering from the base (see
+        ``_attach_tracker``) — so the caller's next objects get ids 1, 2, …
+        regardless of what other sessions have done.  Track ids are
+        per-session namespaces: if another live session later assigns a
+        number this one used, that is an expected cross-session overlap,
+        not a bug — ids carry no meaning outside their own session (the
+        same reason tapnext's per-session counters restart on every reset).
         """
-        tr = sess.tracker
-        if tr is not None:
-            try:
-                tr.reset()          # clears its tracks AND rewinds the shared id counter
-            except Exception:
-                logging.exception("tracker reset failed; dropping it instead")
-        else:
-            # never tracked (or the drop above failed): rewind the shared
-            # counter directly so the FIRST object still starts from base
-            try:
-                self._rewind_tracker_counter()
-            except Exception:
-                logging.exception("id-counter rewind failed")
         sess.tracker = None             # next call adopts a fresh tracker
         sess.frames = 0
 
@@ -287,6 +275,18 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
         """Give ``predictor`` the session's tracker for the upcoming track()
         call (new session: none, so ultralytics creates one we then adopt)."""
         if sess.tracker is None:
+            # A FRESH tracker for this session (new key / regenerate / reload
+            # / right after reset): rewind the shared id counter before it
+            # is adopted, so its first objects are numbered from the base.
+            # Ultralytics' counter is class-level (shared by all tracker
+            # instances); without this, a new session would continue where
+            # all other sessions left off — the "new session but high ids"
+            # surprise.  (Box default tracker: TRACKTRACK -> TTSTrack/
+            # BaseTrack counter; the box does not expose other tracker types.)
+            try:
+                self._rewind_tracker_counter()
+            except Exception:
+                logging.exception("id-counter rewind failed")
             if predictor is not None and hasattr(predictor, "trackers"):
                 try:
                     del predictor.trackers
