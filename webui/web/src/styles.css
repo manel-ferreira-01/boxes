@@ -50,6 +50,7 @@ h2 { margin: 0 0 4px; font-size: 18px; }
 .panel {
   background: var(--bg2); border: 1px solid var(--line);
   border-radius: 12px; padding: 14px 16px; margin-bottom: 14px;
+  overflow-x: auto;      /* narrow viewport: the fixed-width list scrolls, not overflows */
 }
 .panel h3 { margin: 0 0 10px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-dim); }
 
@@ -65,6 +66,27 @@ table.list th {
 table.list td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 table.list tr:last-child td { border-bottom: none; }
 .mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* Fleet list: auto table layout let the def-note paragraph hog the width and
+   crush the NOTE/ADDR columns (headers wrapped vertically, addresses broke
+   mid-address).  Fixed layout + explicit widths keep the shape stable; the
+   DEF column stays elastic (its description text likes the width) and the
+   entry-annotation column (NOTE) is deliberately small — it's free-form
+   per-box scribbles that are usually empty. */
+table.list { table-layout: fixed; min-width: 760px; }
+table.list th:nth-child(1), table.list td:nth-child(1) { width: 30px; }   /* dot   */
+table.list th:nth-child(2), table.list td:nth-child(2) { width: 150px; }  /* name  */
+table.list th:nth-child(3), table.list td:nth-child(3) { width: 132px; }  /* addr  */
+table.list th:nth-child(5), table.list td:nth-child(5) { width: 150px; }  /* note  */
+table.list th:nth-child(6), table.list td:nth-child(6) { width: 252px; }  /* actions */
+/* def (column 4) takes the surplus */
+table.list td.mono { white-space: nowrap; }
+table.list td .btnrow { flex-wrap: nowrap; }
+table.list td .note { overflow-wrap: anywhere; }
+table.list td .note.clamp {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;      /* full text lives in the title tooltip */
+}
 
 .chip {
   display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px;

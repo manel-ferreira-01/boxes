@@ -58,6 +58,14 @@ export default function FleetPage({ defs }: { defs: BoxDef[] }) {
     }
   }, []);
 
+  const anyProbing = Object.values(probing).some(Boolean);
+  const probeAll = useCallback(async () => {
+    const list = entries ?? [];
+    if (list.length === 0) return;
+    // probes are independent: run them concurrently, each row keeps its own dot
+    await Promise.all(list.map((e) => probe(e.id)));
+  }, [entries, probe]);
+
   const refresh = useCallback(async () => {
     try {
       setEntries((await api.fleet()).entries);
@@ -110,7 +118,17 @@ export default function FleetPage({ defs }: { defs: BoxDef[] }) {
       </p>
 
       <div className="panel">
-        <h3>Boxes</h3>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <h3>Boxes</h3>
+          <button
+            className="btn small"
+            disabled={!entries || entries.length === 0 || anyProbing}
+            onClick={() => void probeAll()}
+            title="probe every entry (concurrent, 3 s timeout each)"
+          >
+            {anyProbing ? "probing…" : "probe all"}
+          </button>
+        </div>
         {loadErr && <ErrorBox title="could not load the fleet" detail={loadErr} />}
         {!entries && !loadErr && <div className="empty">loading…</div>}
         {entries && entries.length === 0 && !loadErr && (
@@ -142,7 +160,9 @@ export default function FleetPage({ defs }: { defs: BoxDef[] }) {
                       {e.def_id
                         ? <a href={`#/box/${e.def_id}`}>{e.def_id}</a>
                         : <span className="note">—</span>}
-                      {d?.note && <div className="note">{d.note}</div>}
+                      {d?.note && (
+                        <div className="note clamp" title={d.note}>{d.note}</div>
+                      )}
                     </td>
                     <td>{e.note || ""}</td>
                     <td>
