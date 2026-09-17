@@ -17,8 +17,10 @@ multi-session contract as ``tapnext`` — see its service for the pattern):
   sessions = independent ID sequences.  Server-side sessions are reaped
   after ``YOLO_SESSION_TTL`` idle (default 1800 s; 0 keeps them forever).
 * ``command: reset`` — clears **this session's** tracker state (other
-  sessions untouched); when it is the only live session the tracker's id
-  counter is also rewound so IDs restart from the base.
+  sessions' live tracks untouched) and rewinds the shared id counter, so
+  the caller's next objects start from the base — "reset" means "start
+  over" (tapnext's per-session counters restart unconditionally; track ids
+  are per-session namespaces).
 * ``command: list`` — operator view of active sessions (id/opaque only).
 
 One YOLO model is shared by all sessions; the ultralytics *tracker* object
@@ -247,24 +249,37 @@ class PipelineService(pipeline_pb2_grpc.PipelineServiceServicer):
             sess.last_used = time.time()
             return sess
 
+    def _rewind_tracker_counter(self):
+        """Rewind the ultralytics id counter to its base (class-level)."""
+        from ultralytics.trackers.track_tracker import TTSTrack
+        TTSTrack.reset_id()
+
     def _reset_session(self, sess):
         """Clear ONE session's tracking state (tapnext semantics).
 
-        When it is the only live session the tracker's *global* id counter is
-        rewound too (tracker.reset()), so the next session starts IDs from
-        the base.  With other sessions live we only drop *this* tracker
-        (a fresh one continues the counter) — rewinding a shared counter
-        could otherwise collide with another session's live ids.
+        "Reset" means *start over*: the caller's next objects get fresh ids
+        from the base.  Ultralytics' id counter is class-level (shared by
+        all tracker instances), so we rewind it here — otherwise a session
+        would keep numbering where all other sessions left off (the
+        "reset but ids keep growing" surprise).  Track ids are per-session
+        namespaces: if another live session later assigns a number this
+        one used, that is an expected cross-session overlap, not a bug —
+        ids carry no meaning outside their own session (the same reason
+        tapnext's per-session counters restart unconditionally).
         """
-        with self._sessions_lock:
-            alone = len(self._sessions) <= 1
         tr = sess.tracker
         if tr is not None:
-            if alone:
-                try:
-                    tr.reset()          # clears tracks AND rewinds the id counter
-                except Exception:
-                    logging.exception("tracker reset failed; dropping it instead")
+            try:
+                tr.reset()          # clears its tracks AND rewinds the shared id counter
+            except Exception:
+                logging.exception("tracker reset failed; dropping it instead")
+        else:
+            # never tracked (or the drop above failed): rewind the shared
+            # counter directly so the FIRST object still starts from base
+            try:
+                self._rewind_tracker_counter()
+            except Exception:
+                logging.exception("id-counter rewind failed")
         sess.tracker = None             # next call adopts a fresh tracker
         sess.frames = 0
 
