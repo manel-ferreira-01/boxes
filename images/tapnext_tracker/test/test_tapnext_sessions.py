@@ -288,6 +288,45 @@ def test_grpc_end_to_end():
         server.stop(0)
 
 
+def test_video_input():
+    print("8. data.video input (the box decodes the video server-side, like yolo)")
+    video_path = os.path.join(TEST_DIR, "apple.mp4")
+    if not os.path.exists(video_path):
+        print("  (apple.mp4 fixture not present — skipped)")
+        return
+    with open(video_path, "rb") as f:
+        video_bytes = f.read()
+
+    svc = make_service()
+
+    def call(data, params, sid):
+        cfg = {"tapnext": {"command": "track", "session_id": sid, "parameters": params}}
+        return svc.Process(pb2.Envelope(config_json=json.dumps(cfg), data=data), None)
+
+    r = call({"video": aux.wrap_value(video_bytes)},
+             {"grid_size": 4, "frame_step": 2, "max_frames": 3}, "v-sampled")
+    c = cfg_of(r)
+    check("video: status done + session echo", c.get("status") == "done" and c.get("session") == "v-sampled", str(c))
+    check("video: frames_processed == max_frames (3)", c.get("frames_processed") == 3, f"got {c.get('frames_processed')}")
+    check("video: encoding still declares 'torch'", c.get("encoding", {}).get("tracks") == "torch")
+    check("video: tracks + visibles returned", "tracks" in r.data and "visibles" in r.data)
+    t = last_tracks(r)
+    check("video: tracks shape (frames, points, 2)", t.ndim == 3 and t.shape[2] == 2 and t.shape[0] == 3, f"shape={t.shape}")
+
+    frame = make_frame_bytes()
+    rb = call({"video": aux.wrap_value(video_bytes), "images": aux.wrap_value([frame])},
+              {"grid_size": 4}, "v-both")
+    cb = cfg_of(rb)
+    check("video+images rejected (mutually exclusive)", cb.get("status") == "error" and "both" in cb.get("error", ""), str(cb))
+
+    rn = call({}, {"grid_size": 4}, "v-none")
+    check("neither input -> empty_request", cfg_of(rn).get("status") == "empty_request")
+
+    ri = call({"images": aux.wrap_value([frame, frame])}, {"grid_size": 4}, "v-img")
+    check("legacy images path unaffected (2 frames)", cfg_of(ri).get("frames_processed") == 2,
+          f"got {cfg_of(ri).get('frames_processed')}")
+
+
 def main():
     tests = [
         test_isolation,
@@ -297,6 +336,7 @@ def main():
         test_reaper,
         test_list,
         test_grpc_end_to_end,
+        test_video_input,
     ]
     for t in tests:
         t()

@@ -7,6 +7,9 @@ A gRPC service for TAPNext point tracking with streaming support, following the 
 - Frame-by-frame tracking with state preservation
 - Grid-based query point detection on first frame
 - Server-side track accumulation until reset
+- **Video input**: `data.video` — the box decodes the video into ordered frames
+  on the server side and tracks them (same shape as yolo's `data.video`);
+  `frame_step` / `max_frames` control the sampling
 - **Multi-session (multi-tenant)**: one box serves many independent users at
   once — each `session_id` holds its own state, its own reset, and its own
   accumulation (see [Sessions](#sessions-sharing-one-box-with-many-users))
@@ -110,6 +113,30 @@ visibles = unwrap_value(response.data["visibles"])
 
 Each frame you send continues from the previous tracking state. No reset flag needed between frames.
 
+#### Video Tracking Request
+
+Instead of an explicit frame list you may send a **single video file**. The box
+decodes it into ordered frames on the server side (mirroring the yolo box) and
+feeds them through the exact same per-frame tracker:
+
+```python
+video_bytes = open("cozinha.mp4", "rb").read()   # or pathlib.Path(...) via boxes_client
+
+request = proto.Envelope(
+    config_json=json.dumps({
+        "tapnext": {
+            "command": "track",
+            "parameters": {"grid_size": 32, "frame_step": 4, "max_frames": 24}
+        }
+    }),
+    data={"video": wrap_value(video_bytes)}
+)
+```
+
+`data.images` and `data.video` are **mutually exclusive** — sending both returns a
+clear error. The response is identical to the image case: `tracks`, `visibles`,
+`observation_matrix` (plus the `frames_processed` count in the config).
+
 ### Sessions (sharing one box with many users)
 
 The box is **multi-tenancy-ready**: every request can carry a `session_id`
@@ -186,6 +213,8 @@ request = proto.Envelope(
 | `command` | string | "track" | "track" for inference, "reset" to clear *this session's* tracking state, "list" to see active sessions (operator) |
 | `session_id` | string | `"default"` | Opaque session tag; gives the user a private state. Share an id = share a session |
 | `grid_size` | int | 32 | Number of grid points per dimension (grid_size × grid_size total) |
+| `frame_step` | int | 1 | Video input: sample every Nth frame (1 = every frame) |
+| `max_frames` | int | 0 | Cap on the number of frames to track (video input; 0 = no cap) |
 
 ### Response Format
 

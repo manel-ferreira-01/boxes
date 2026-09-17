@@ -8,6 +8,7 @@ import json
 import sys
 import io
 import threading
+import tempfile
 
 sys.path.append("./protos")
 import pipeline_pb2 as tapnext_pb2
@@ -124,6 +125,22 @@ class Session:
         self.accumulated_visibles = []
         self.last_used = time.time()
         self.lock = threading.Lock()   # L2: serializes requests WITHIN this session
+
+
+def _sniff_video_ext(b: bytes) -> str:
+    """Best-effort video container extension from magic bytes.
+
+    Mirrors the yolo box: OpenCV's VideoCapture needs a container it can parse,
+    but the extension only steers its backend selection, so ``.mp4`` is the
+    safe fallback (covers ISO-BMFF: mp4/mov/m4v all share ``ftyp``).
+    """
+    if len(b) > 12 and b[4:8] == b"ftyp":
+        return ".mp4"
+    if b[:4] == b"RIFF" and len(b) > 12 and b[8:12] == b"AVI ":
+        return ".avi"
+    if b[:4] == b"\x1a\x45\xdf\xa3":          # EBML: webm/mkv
+        return ".webm"
+    return ".mp4"
 
 
 class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
@@ -307,18 +324,24 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                         {"tapnext": {"status": "done", "action": "list", "sessions": listing}})
                 )
 
-            if not request.data.get("images"):
+            has_images = "images" in request.data
+            has_video  = "video"  in request.data
+
+            # `data.images` (a list of image bytes) and `data.video` (a single
+            # video file) are mutually-exclusive inputs to the SAME per-frame
+            # tracking loop: the video is decoded server-side into ordered
+            # frames, mirroring the yolo box's `data.video` input.
+            if has_images and has_video:
+                return tapnext_pb2.Envelope(
+                    config_json=json.dumps(
+                        {"tapnext": {"status": "error",
+                                     "error": "send either data.images or data.video, not both",
+                                     "session": sid}})
+                )
+            if not has_images and not has_video:
                 return tapnext_pb2.Envelope(
                     config_json=json.dumps(
                         {"tapnext": {"status": "empty_request", "session": sid}})
-                )
-
-            image_bytes_list = unwrap_value(request.data["images"])
-            if not isinstance(image_bytes_list, list) or len(image_bytes_list) == 0:
-                return tapnext_pb2.Envelope(
-                    config_json=json.dumps(
-                        {"tapnext": {"status": "error", "error": "No images in data",
-                                     "session": sid}})
                 )
 
             start_time = time.time()
@@ -328,18 +351,39 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
                 self._last_request_time = time.time()
                 self._promote_to_gpu()
 
-                for img_bytes in image_bytes_list:
-                    frame_np = self._decode_image(img_bytes)
+                def track_frame_in_session(frame_np):
+                    """Feed one decoded frame into this session's tracker (None-safe)."""
                     if frame_np is None:
-                        continue
-
+                        return
                     tracks, visibles = self._track_frame(frame_np, parameters, sess)
                     if tracks is not None:
                         sess.accumulated_tracks.append(tracks)
                         sess.accumulated_visibles.append(visibles)
-
                         # Accumulate for full observation matrix across requests
                         sess.full_tracking_data.append((tracks.copy(), visibles.copy()))
+
+                if has_images:
+                    image_bytes_list = unwrap_value(request.data["images"])
+                    if not isinstance(image_bytes_list, list) or len(image_bytes_list) == 0:
+                        return tapnext_pb2.Envelope(
+                            config_json=json.dumps(
+                                {"tapnext": {"status": "error", "error": "No images in data",
+                                             "session": sid}})
+                        )
+                    for img_bytes in image_bytes_list:
+                        track_frame_in_session(self._decode_image(img_bytes))
+                else:
+                    video_bytes = unwrap_value(request.data["video"])
+                    if not isinstance(video_bytes, (bytes, bytearray, memoryview)) or len(video_bytes) == 0:
+                        return tapnext_pb2.Envelope(
+                            config_json=json.dumps(
+                                {"tapnext": {"status": "error", "error": "No video in data",
+                                             "session": sid}})
+                        )
+                    frame_step = int(parameters.get("frame_step", 1) or 1)
+                    max_frames = int(parameters.get("max_frames", 0) or 0)   # 0 -> no cap
+                    for frame_np in self._decode_video(bytes(video_bytes), frame_step, max_frames):
+                        track_frame_in_session(frame_np)
 
                 response_data = {}
                 if sess.accumulated_tracks:
@@ -399,6 +443,45 @@ class PipelineService(tapnext_pb2_grpc.PipelineServiceServicer):
         except Exception as e:
             logging.error(f"Failed to decode image: {e}")
             return None
+
+    def _decode_video(self, video_bytes, frame_step=1, max_frames=0):
+        """Server-side decode of one video file (mp4/avi/webm/mov) into an
+        ordered list of BGR frames — every `frame_step`-th frame, up to
+        `max_frames` (0 = no cap). Same recipe as the yolo box: sniff the
+        container from magic bytes, spill to a temp file, read with
+        `cv2.VideoCapture`. BGR is what `_track_frame` expects (it converts
+        BGR->RGB internally)."""
+        suffix = _sniff_video_ext(video_bytes)
+        tmp_path = None
+        frames = []
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp_path = tmp.name
+            tmp.write(video_bytes)
+            tmp.close()
+            cap = cv2.VideoCapture(tmp_path)
+            if not cap.isOpened():
+                logging.error(
+                    "cv2.VideoCapture could not open the video "
+                    f"(sniffed container {suffix!r} — unsupported codec?)")
+                return []
+            decoded = 0
+            step = max(1, int(frame_step))
+            while (max_frames <= 0 or len(frames) < max_frames):
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                if decoded % step == 0:
+                    frames.append(frame)
+                decoded += 1
+            cap.release()
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+        return frames
 
     def _track_frame(self, frame_np, parameters, sess):
         if frame_np.ndim == 2:
